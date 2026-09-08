@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Papa from "papaparse";
+import { cloudConfigured, getCurrentSession, loadCloudData, saveCloudData, signIn, signOut, signUp } from "./cloud.js";
 import {
   ResponsiveContainer,
   LineChart,
@@ -224,45 +225,42 @@ function rowToTrade(row) {
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "tape:trades";
+const TAGS_STORAGE_KEY = "tape:tags";
 
-async function loadTrades() {
+function loadLocalTrades() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
-  } catch (e) {
+  } catch {
     return [];
   }
 }
 
-function persistTrades(trades) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trades));
-  } catch (e) {
-    // storage full or unavailable — silent, will retry on next mutation
-  }
-}
-
-const TAGS_STORAGE_KEY = "tape:tags";
-
-async function loadTagLibrary() {
+function loadLocalTags() {
   try {
     const raw = window.localStorage.getItem(TAGS_STORAGE_KEY);
-    if (!raw) return DEFAULT_TAGS;
-    const parsed = JSON.parse(raw);
+    const parsed = raw ? JSON.parse(raw) : DEFAULT_TAGS;
     return Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_TAGS;
-  } catch (e) {
+  } catch {
     return DEFAULT_TAGS;
   }
 }
 
-function persistTagLibrary(tags) {
-  try {
-    window.localStorage.setItem(TAGS_STORAGE_KEY, JSON.stringify(tags));
-  } catch (e) {
-    // silent — will retry on next mutation
-  }
+function persistLocalTrades(trades) {
+  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trades)); } catch {}
+}
+
+function persistLocalTags(tags) {
+  try { window.localStorage.setItem(TAGS_STORAGE_KEY, JSON.stringify(tags)); } catch {}
+}
+
+function mergeById(primary, secondary) {
+  const map = new Map();
+  [...primary, ...secondary].forEach((item) => {
+    if (item?.id) map.set(item.id, item);
+  });
+  return [...map.values()];
 }
 
 // ---------------------------------------------------------------------------
@@ -1178,48 +1176,131 @@ export default function TradingJournal() {
   const [rawTrades, setRawTrades] = useState([]);
   const [tagLibrary, setTagLibrary] = useState(DEFAULT_TAGS);
   const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(null);
+  const [authMode, setAuthMode] = useState("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [syncing, setSyncing] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [formOpen, setFormOpen] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
   const [importMsg, setImportMsg] = useState("");
   const fileInputRef = useRef(null);
 
+  const sync = useCallback(async (nextTrades, nextTags) => {
+    persistLocalTrades(nextTrades);
+    persistLocalTags(nextTags);
+    if (!session || !cloudConfigured) return;
+    setSyncing(true);
+    try {
+      await saveCloudData(nextTrades, nextTags);
+    } catch (e) {
+      setImportMsg(`Saved locally; cloud sync failed: ${e.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  }, [session]);
+
   useEffect(() => {
     let mounted = true;
-    Promise.all([loadTrades(), loadTagLibrary()]).then(([t, tags]) => {
-      if (mounted) {
-        setRawTrades(t);
-        setTagLibrary(tags);
-        setLoading(false);
+    (async () => {
+      if (!cloudConfigured) {
+        if (mounted) {
+          setRawTrades(loadLocalTrades());
+          setTagLibrary(loadLocalTags());
+          setLoading(false);
+        }
+        return;
       }
-    });
-    return () => {
-      mounted = false;
-    };
+      try {
+        const current = await getCurrentSession();
+        if (!mounted) return;
+        if (current) {
+          setSession(current);
+          const cloud = await loadCloudData();
+          if (!mounted) return;
+          const localTrades = loadLocalTrades();
+          const localTags = loadLocalTags();
+          const mergedTrades = mergeById(cloud?.trades || [], localTrades);
+          const mergedTags = mergeById(cloud?.tags || [], localTags);
+          setRawTrades(mergedTrades);
+          setTagLibrary(mergedTags.length ? mergedTags : DEFAULT_TAGS);
+          await saveCloudData(mergedTrades, mergedTags.length ? mergedTags : DEFAULT_TAGS);
+          persistLocalTrades(mergedTrades);
+          persistLocalTags(mergedTags.length ? mergedTags : DEFAULT_TAGS);
+        } else {
+          setRawTrades([]);
+          setTagLibrary(DEFAULT_TAGS);
+        }
+      } catch (e) {
+        setAuthError(e.message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
   }, []);
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    setAuthMessage("");
+    if (!authEmail || !authPassword) return setAuthError("Enter your email and password.");
+    if (authPassword.length < 6) return setAuthError("Password must be at least 6 characters.");
+    setLoading(true);
+    try {
+      const localTrades = loadLocalTrades();
+      const localTags = loadLocalTags();
+      const data = authMode === "signup" ? await signUp(authEmail, authPassword) : await signIn(authEmail, authPassword);
+      if (!data?.access_token) {
+        setAuthMessage("Account created. Check your email to confirm it, then sign in.");
+        setAuthMode("signin");
+        return;
+      }
+      const current = await getCurrentSession();
+      setSession(current);
+      const cloud = await loadCloudData();
+      const mergedTrades = mergeById(cloud?.trades || [], localTrades);
+      const mergedTags = mergeById(cloud?.tags || [], localTags);
+      const finalTags = mergedTags.length ? mergedTags : DEFAULT_TAGS;
+      setRawTrades(mergedTrades);
+      setTagLibrary(finalTags);
+      await saveCloudData(mergedTrades, finalTags);
+      persistLocalTrades(mergedTrades);
+      persistLocalTags(finalTags);
+    } catch (e2) {
+      setAuthError(e2.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignOut = () => {
+    signOut();
+    setSession(null);
+    setRawTrades([]);
+    setTagLibrary(DEFAULT_TAGS);
+  };
 
   const handleCreateTag = useCallback((tag) => {
     setTagLibrary((prev) => {
       const next = [...prev, tag];
-      persistTagLibrary(next);
+      sync(rawTrades, next);
       return next;
     });
-  }, []);
+  }, [rawTrades, sync]);
 
   const handleDeleteTag = useCallback((tagId) => {
     setTagLibrary((prev) => {
       const next = prev.filter((t) => t.id !== tagId);
-      persistTagLibrary(next);
+      sync(rawTrades, next);
       return next;
     });
-  }, []);
+  }, [rawTrades, sync]);
 
   const trades = useMemo(() => rawTrades.map(enrichTrade), [rawTrades]);
-
-  const saveTrades = useCallback((next) => {
-    setRawTrades(next);
-    persistTrades(next);
-  }, []);
 
   const handleAddNew = () => {
     setEditingTrade(null);
@@ -1235,7 +1316,7 @@ export default function TradingJournal() {
     setRawTrades((prev) => {
       const exists = prev.some((t) => t.id === trade.id);
       const next = exists ? prev.map((t) => (t.id === trade.id ? trade : t)) : [...prev, trade];
-      persistTrades(next);
+      sync(next, tagLibrary);
       return next;
     });
     setFormOpen(false);
@@ -1245,7 +1326,7 @@ export default function TradingJournal() {
   const handleDelete = (id) => {
     setRawTrades((prev) => {
       const next = prev.filter((t) => t.id !== id);
-      persistTrades(next);
+      sync(next, tagLibrary);
       return next;
     });
     setFormOpen(false);
@@ -1265,7 +1346,7 @@ export default function TradingJournal() {
         } else {
           setRawTrades((prev) => {
             const next = [...prev, ...parsed];
-            persistTrades(next);
+            sync(next, tagLibrary);
             return next;
           });
           setImportMsg(`Imported ${parsed.length} trade${parsed.length > 1 ? "s" : ""}.`);
@@ -1291,6 +1372,38 @@ export default function TradingJournal() {
   };
 
   const tabLabel = { dashboard: "Dashboard", trades: "Trades", calendar: "Calendar" }[tab];
+
+  if (cloudConfigured && !session && !loading) {
+    return (
+      <div className="tj-auth-page">
+        <style>{`
+          .tj-auth-page { min-height:100vh; display:flex; align-items:center; justify-content:center; background:#0F1512; color:#E8ECE9; font-family:'IBM Plex Mono',monospace; padding:24px; }
+          .tj-auth-card { width:100%; max-width:420px; border:1px solid #34413A; background:#141B17; padding:32px; }
+          .tj-auth-card h1 { font-family:'Fraunces',serif; font-weight:500; margin:0 0 8px; font-size:28px; }
+          .tj-auth-card p { color:#8B968F; font-size:12px; line-height:1.6; margin:0 0 24px; }
+          .tj-auth-field { display:block; margin-bottom:14px; }
+          .tj-auth-field span { display:block; color:#8B968F; font-size:11px; margin-bottom:6px; }
+          .tj-auth-field input { width:100%; padding:10px 12px; background:#171F1B; border:1px solid #34413A; color:#E8ECE9; font:13px 'IBM Plex Mono',monospace; }
+          .tj-auth-submit { width:100%; padding:11px; border:1px solid #D9A84E; background:#D9A84E; color:#241a06; font:600 12px 'IBM Plex Mono',monospace; cursor:pointer; margin-top:4px; }
+          .tj-auth-switch { background:none; border:0; color:#8B968F; cursor:pointer; font:11px 'IBM Plex Mono',monospace; padding:12px 0 0; }
+          .tj-auth-error { color:#C1584A; font-size:11px; line-height:1.5; margin:12px 0 0; }
+          .tj-auth-msg { color:#D9A84E; font-size:11px; line-height:1.5; margin:12px 0 0; }
+        `}</style>
+        <form className="tj-auth-card" onSubmit={handleAuth}>
+          <h1>Farley Trades<span style={{color:'#D9A84E'}}>.</span></h1>
+          <p>{authMode === "signup" ? "Create an account so your journal syncs across your phone, laptop, and desktop." : "Sign in to access the same journal from every device."}</p>
+          <label className="tj-auth-field"><span>Email</span><input type="email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} autoComplete="email" /></label>
+          <label className="tj-auth-field"><span>Password</span><input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} autoComplete={authMode === "signup" ? "new-password" : "current-password"} /></label>
+          <button className="tj-auth-submit" type="submit">{authMode === "signup" ? "Create account" : "Sign in"}</button>
+          {authError ? <div className="tj-auth-error">{authError}</div> : null}
+          {authMessage ? <div className="tj-auth-msg">{authMessage}</div> : null}
+          <button type="button" className="tj-auth-switch" onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setAuthError(""); setAuthMessage(""); }}>
+            {authMode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="tj-app">
@@ -1375,6 +1488,7 @@ export default function TradingJournal() {
         .tj-header h1 { font-family: var(--font-serif); font-weight: 500; font-size: 24px; margin: 0; }
         .tj-header-actions { display: flex; gap: 10px; align-items: center; }
         .tj-import-msg { font-size: 12px; color: var(--accent); }
+        .tj-sync-status { font-size: 11px; color: var(--text-faint); }
 
         /* Buttons */
         .tj-btn {
@@ -1623,6 +1737,7 @@ export default function TradingJournal() {
           <h1>{tabLabel}</h1>
           <div className="tj-header-actions">
             {importMsg ? <span className="tj-import-msg">{importMsg}</span> : null}
+            {cloudConfigured && session ? <><span className="tj-sync-status">{syncing ? "Syncing…" : "Cloud synced"}</span><button className="tj-btn" onClick={handleSignOut}>Sign out</button></> : null}
           </div>
         </div>
 
