@@ -1410,6 +1410,18 @@ export default function TradingJournal() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
+        html, body, #root {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          min-height: 100%;
+          background: #0F1512;
+        }
+
+        body {
+          background: #0F1512;
+        }
+
         .tj-app {
           --bg: #0F1512;
           --surface: #141B17;
