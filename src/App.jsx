@@ -1340,12 +1340,16 @@ export default function TradingJournal() {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const parsed = results.data.map(rowToTrade).filter((t) => t.date && t.entryPrice !== "" && t.exitPrice !== "");
+        const parsed = results.data
+          .map(rowToTrade)
+          .filter((t) => t.date && t.entryPrice !== "" && t.exitPrice !== "");
+
         if (parsed.length === 0) {
           setImportMsg("No valid rows found. Check your CSV columns.");
         } else {
           setRawTrades((prev) => {
-            const next = [...prev, ...parsed];
+            const existingIds = new Set(prev.map((t) => t.id));
+            const next = [...prev, ...parsed.filter((t) => !existingIds.has(t.id))];
             sync(next, tagLibrary);
             return next;
           });
