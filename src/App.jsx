@@ -1591,7 +1591,7 @@ export default function TradingJournal() {
 
       <aside className="tj-sidebar">
         <div className="tj-wordmark">
-          tape<span>.</span>
+          Farley Trades<span>.</span>
         </div>
         <nav className="tj-nav">
           <button className={`tj-nav-item ${tab === "dashboard" ? "tj-nav-active" : ""}`} onClick={() => setTab("dashboard")}>
