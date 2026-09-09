@@ -324,6 +324,7 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
         tpPrice: "",
         slPrice: "",
         notes: "",
+        screenshot: "",
         tags: [],
         confidenceBefore: "",
         confidenceAfter: "",
@@ -333,6 +334,17 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagEmoji, setNewTagEmoji] = useState("");
   const [newTagLabel, setNewTagLabel] = useState("");
+
+  const handleScreenshot = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((f) => ({ ...f, screenshot: String(reader.result || "") }));
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
 
   const toggleTag = (tagId) => {
     setForm((f) => {
@@ -378,6 +390,7 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
       exitPrice: Number(form.exitPrice),
       tpPrice: form.tpPrice === "" ? "" : Number(form.tpPrice),
       slPrice: form.slPrice === "" ? "" : Number(form.slPrice),
+      screenshot: form.screenshot || "",
     });
   };
 
@@ -462,6 +475,25 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
             <span>Notes</span>
             <textarea rows={3} value={form.notes} onChange={set("notes")} placeholder="Setup, mistakes, mindset..." />
           </label>
+
+          <div className="tj-field tj-field-wide">
+            <span>Screenshot</span>
+            <div className="tj-upload-box">
+              {form.screenshot ? (
+                <div className="tj-screenshot-preview">
+                  <img src={form.screenshot} alt="Trade screenshot preview" />
+                  <button type="button" className="tj-btn tj-btn-danger" onClick={() => setForm((f) => ({ ...f, screenshot: "" }))}>
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <label className="tj-upload-button">
+                  <input type="file" accept="image/*" onChange={handleScreenshot} />
+                  <span>Add screenshot</span>
+                </label>
+              )}
+            </div>
+          </div>
 
           <div className="tj-field tj-field-wide">
             <span>Confidence before entry</span>
@@ -892,6 +924,7 @@ function TradesTab({ trades, tagLibrary, onEdit }) {
                 <th>Exit</th>
                 <th>R</th>
                 <th>P&amp;L</th>
+                <th>Image</th>
                 <th>Tags</th>
                 <th>Conf.</th>
                 <th></th>
@@ -912,6 +945,13 @@ function TradesTab({ trades, tagLibrary, onEdit }) {
                   <td className="tj-table-dim">{t.realizedR === null ? "—" : `${t.realizedR >= 0 ? "+" : ""}${fmtNum(t.realizedR, 2)}R`}</td>
                   <td>
                     <PnLText value={t.pnl} decimals={0} />
+                  </td>
+                  <td>
+                    {t.screenshot ? (
+                      <img className="tj-trade-thumb" src={t.screenshot} alt="Trade screenshot" />
+                    ) : (
+                      <span className="tj-table-dim">—</span>
+                    )}
                   </td>
                   <td>
                     <div className="tj-table-tags">
@@ -1648,6 +1688,15 @@ export default function TradingJournal() {
         }
         .tj-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
         .tj-table-row { cursor: pointer; }
+        .tj-trade-thumb {
+          width: 32px;
+          height: 32px;
+          object-fit: cover;
+          border-radius: 4px;
+          border: 1px solid var(--border-strong);
+          background: #0b0f0d;
+          display: block;
+        }
         .tj-table-row:hover { background: var(--surface-2); }
         .tj-table-row:last-child td { border-bottom: none; }
         .tj-table-dim { color: var(--text-dim); }
@@ -1690,6 +1739,15 @@ export default function TradingJournal() {
         }
         .tj-form-error { color: var(--loss); font-size: 12px; margin-top: 10px; }
         .tj-modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+        .tj-upload-box { display: flex; flex-direction: column; gap: 10px; }
+        .tj-upload-button {
+          display: inline-flex; align-items: center; justify-content: center;
+          min-height: 42px; padding: 10px 12px; border: 1px dashed var(--border-strong);
+          background: var(--surface-2); color: var(--text-dim); border-radius: 4px; cursor: pointer;
+        }
+        .tj-upload-button input { display: none; }
+        .tj-screenshot-preview { display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px solid var(--border); background: var(--surface-2); border-radius: 4px; }
+        .tj-screenshot-preview img { width: 86px; height: 86px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border-strong); background: #0b0f0d; }
 
         /* Calendar */
         .tj-cal-controls { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
@@ -1707,9 +1765,9 @@ export default function TradingJournal() {
         .tj-cal-panel { border: 1px solid var(--border); padding: 16px; }
         .tj-cal-weekday-row { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 8px; }
         .tj-cal-weekday { text-align: center; font-size: 11px; color: var(--text-faint); }
-        .tj-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+        .tj-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
         .tj-cal-cell {
-          aspect-ratio: 1 / 0.85; border: 1px solid var(--border); border-radius: 2px;
+          min-height: 74px; border: 1px solid var(--border); border-radius: 2px;
           padding: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 10.5px;
         }
         .tj-cal-cell-blank { border: none; }
@@ -1835,6 +1893,50 @@ export default function TradingJournal() {
             gap: 4px;
           }
 
+          .tj-cal-controls {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+          }
+
+          .tj-tab-switch {
+            width: 100%;
+          }
+
+          .tj-tab-switch button {
+            flex: 1;
+          }
+
+          .tj-cal-nav {
+            width: 100%;
+            justify-content: space-between;
+          }
+
+          .tj-cal-title {
+            min-width: 0;
+            flex: 1;
+            text-align: center;
+          }
+
+          .tj-cal-total {
+            display: block;
+            text-align: left;
+            margin-left: 0;
+          }
+
+          .tj-cal-grid {
+            gap: 3px;
+          }
+
+          .tj-cal-cell {
+            min-height: 58px;
+            padding: 4px;
+          }
+
+          .tj-cal-amount {
+            font-size: 10.5px;
+          }
+
           .tj-two-col {
             grid-template-columns: 1fr;
             gap: 14px;
@@ -1877,15 +1979,19 @@ export default function TradingJournal() {
           }
 
           .tj-week-row {
-            gap: 10px;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
             padding: 10px 12px;
           }
 
           .tj-week-label {
-            width: 90px;
+            width: auto;
           }
 
           .tj-week-stats {
+            margin-left: 0;
+            justify-content: space-between;
             gap: 6px;
             font-size: 11px;
           }
