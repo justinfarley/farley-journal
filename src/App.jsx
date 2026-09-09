@@ -1223,13 +1223,16 @@ export default function TradingJournal() {
           if (!mounted) return;
           const localTrades = loadLocalTrades();
           const localTags = loadLocalTags();
-          const mergedTrades = mergeById(cloud?.trades || [], localTrades);
-          const mergedTags = mergeById(cloud?.tags || [], localTags);
-          setRawTrades(mergedTrades);
-          setTagLibrary(mergedTags.length ? mergedTags : DEFAULT_TAGS);
-          await saveCloudData(mergedTrades, mergedTags.length ? mergedTags : DEFAULT_TAGS);
-          persistLocalTrades(mergedTrades);
-          persistLocalTags(mergedTags.length ? mergedTags : DEFAULT_TAGS);
+          const cloudTrades = Array.isArray(cloud?.trades) ? cloud.trades : [];
+          const cloudTags = Array.isArray(cloud?.tags) ? cloud.tags : [];
+          const sourceTrades = cloudTrades.length ? cloudTrades : localTrades;
+          const sourceTags = cloudTags.length ? cloudTags : (localTags.length ? localTags : DEFAULT_TAGS);
+
+          setRawTrades(sourceTrades);
+          setTagLibrary(sourceTags);
+          await saveCloudData(sourceTrades, sourceTags);
+          persistLocalTrades(sourceTrades);
+          persistLocalTags(sourceTags);
         } else {
           setRawTrades([]);
           setTagLibrary(DEFAULT_TAGS);
@@ -1262,14 +1265,16 @@ export default function TradingJournal() {
       const current = await getCurrentSession();
       setSession(current);
       const cloud = await loadCloudData();
-      const mergedTrades = mergeById(cloud?.trades || [], localTrades);
-      const mergedTags = mergeById(cloud?.tags || [], localTags);
-      const finalTags = mergedTags.length ? mergedTags : DEFAULT_TAGS;
-      setRawTrades(mergedTrades);
-      setTagLibrary(finalTags);
-      await saveCloudData(mergedTrades, finalTags);
-      persistLocalTrades(mergedTrades);
-      persistLocalTags(finalTags);
+      const cloudTrades = Array.isArray(cloud?.trades) ? cloud.trades : [];
+      const cloudTags = Array.isArray(cloud?.tags) ? cloud.tags : [];
+      const sourceTrades = cloudTrades.length ? cloudTrades : localTrades;
+      const sourceTags = cloudTags.length ? cloudTags : (localTags.length ? localTags : DEFAULT_TAGS);
+
+      setRawTrades(sourceTrades);
+      setTagLibrary(sourceTags);
+      await saveCloudData(sourceTrades, sourceTags);
+      persistLocalTrades(sourceTrades);
+      persistLocalTags(sourceTags);
     } catch (e2) {
       setAuthError(e2.message);
     } finally {
@@ -1381,17 +1386,47 @@ export default function TradingJournal() {
     return (
       <div className="tj-auth-page">
         <style>{`
-          .tj-auth-page { min-height:100vh; display:flex; align-items:center; justify-content:center; background:#0F1512; color:#E8ECE9; font-family:'IBM Plex Mono',monospace; padding:24px; }
-          .tj-auth-card { width:100%; max-width:420px; border:1px solid #34413A; background:#141B17; padding:32px; }
+          html, body, #root {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            min-height: 100%;
+            background: #0F1512;
+          }
+
+          body {
+            background: #0F1512;
+          }
+
+          .tj-auth-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0F1512;
+            color: #E8ECE9;
+            font-family: 'IBM Plex Mono', monospace;
+            padding: 24px;
+          }
+          .tj-auth-card { width:100%; max-width:420px; border:1px solid #34413A; background:#141B17; padding:32px; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
           .tj-auth-card h1 { font-family:'Fraunces',serif; font-weight:500; margin:0 0 8px; font-size:28px; }
           .tj-auth-card p { color:#8B968F; font-size:12px; line-height:1.6; margin:0 0 24px; }
           .tj-auth-field { display:block; margin-bottom:14px; }
           .tj-auth-field span { display:block; color:#8B968F; font-size:11px; margin-bottom:6px; }
-          .tj-auth-field input { width:100%; padding:10px 12px; background:#171F1B; border:1px solid #34413A; color:#E8ECE9; font:13px 'IBM Plex Mono',monospace; }
-          .tj-auth-submit { width:100%; padding:11px; border:1px solid #D9A84E; background:#D9A84E; color:#241a06; font:600 12px 'IBM Plex Mono',monospace; cursor:pointer; margin-top:4px; }
+          .tj-auth-field input { width:100%; padding:10px 12px; background:#171F1B; border:1px solid #34413A; color:#E8ECE9; font:13px 'IBM Plex Mono',monospace; border-radius: 4px; }
+          .tj-auth-submit { width:100%; padding:11px; border:1px solid #D9A84E; background:#D9A84E; color:#241a06; font:600 12px 'IBM Plex Mono',monospace; cursor:pointer; margin-top:4px; border-radius: 4px; }
           .tj-auth-switch { background:none; border:0; color:#8B968F; cursor:pointer; font:11px 'IBM Plex Mono',monospace; padding:12px 0 0; }
           .tj-auth-error { color:#C1584A; font-size:11px; line-height:1.5; margin:12px 0 0; }
           .tj-auth-msg { color:#D9A84E; font-size:11px; line-height:1.5; margin:12px 0 0; }
+
+          @media (max-width: 420px) {
+            .tj-auth-page {
+              padding: 16px;
+            }
+            .tj-auth-card {
+              padding: 22px 18px;
+            }
+          }
         `}</style>
         <form className="tj-auth-card" onSubmit={handleAuth}>
           <h1>Farley Trades<span style={{color:'#D9A84E'}}>.</span></h1>
