@@ -877,6 +877,7 @@ function TradesTab({ trades, tagLibrary, onEdit }) {
   }, [tagLibrary]);
   const [filterInst, setFilterInst] = useState("all");
   const [filterResult, setFilterResult] = useState("all");
+  const [previewImage, setPreviewImage] = useState(null);
 
   const filtered = useMemo(() => {
     let list = [...trades].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -911,66 +912,89 @@ function TradesTab({ trades, tagLibrary, onEdit }) {
           <p>Try clearing your filters, or log a new trade.</p>
         </div>
       ) : (
-        <div className="tj-table-wrap">
-          <table className="tj-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Day</th>
-                <th>Inst</th>
-                <th>Dir</th>
-                <th>Ctr</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th>R</th>
-                <th>P&amp;L</th>
-                <th>Image</th>
-                <th>Tags</th>
-                <th>Conf.</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((t) => (
-                <tr key={t.id} onClick={() => onEdit(t)} className="tj-table-row">
-                  <td>{fmtDateShort(t.date)}</td>
-                  <td className="tj-table-dim">{t.dow.slice(0, 3)}</td>
-                  <td>{t.instrument}</td>
-                  <td className={t.direction === "Long" ? "tj-pos" : "tj-neg"}>
-                    {t.direction === "Long" ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-                  </td>
-                  <td>{t.contracts}</td>
-                  <td className="tj-table-dim">{fmtNum(t.entryPrice, 2)}</td>
-                  <td className="tj-table-dim">{fmtNum(t.exitPrice, 2)}</td>
-                  <td className="tj-table-dim">{t.realizedR === null ? "—" : `${t.realizedR >= 0 ? "+" : ""}${fmtNum(t.realizedR, 2)}R`}</td>
-                  <td>
-                    <PnLText value={t.pnl} decimals={0} />
-                  </td>
-                  <td>
-                    {t.screenshot ? (
-                      <img className="tj-trade-thumb" src={t.screenshot} alt="Trade screenshot" />
-                    ) : (
-                      <span className="tj-table-dim">—</span>
-                    )}
-                  </td>
-                  <td>
-                    <div className="tj-table-tags">
-                      {(t.tags || []).map((tid) => (tagById[tid] ? <span key={tid} title={tagById[tid].label}>{tagById[tid].emoji}</span> : null))}
-                    </div>
-                  </td>
-                  <td className="tj-table-dim">
-                    {t.confidenceBefore || t.confidenceAfter
-                      ? `${t.confidenceBefore || "–"}→${t.confidenceAfter || "–"}`
-                      : "—"}
-                  </td>
-                  <td>
-                    <Pencil size={14} className="tj-edit-icon" />
-                  </td>
+        <>
+          <div className="tj-table-wrap">
+            <table className="tj-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Day</th>
+                  <th>Inst</th>
+                  <th>Dir</th>
+                  <th>Ctr</th>
+                  <th>Entry</th>
+                  <th>Exit</th>
+                  <th>R</th>
+                  <th>P&amp;L</th>
+                  <th>Image</th>
+                  <th>Tags</th>
+                  <th>Conf.</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((t) => (
+                  <tr key={t.id} onClick={() => onEdit(t)} className="tj-table-row">
+                    <td>{fmtDateShort(t.date)}</td>
+                    <td className="tj-table-dim">{t.dow.slice(0, 3)}</td>
+                    <td>{t.instrument}</td>
+                    <td className={t.direction === "Long" ? "tj-pos" : "tj-neg"}>
+                      {t.direction === "Long" ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
+                    </td>
+                    <td>{t.contracts}</td>
+                    <td className="tj-table-dim">{fmtNum(t.entryPrice, 2)}</td>
+                    <td className="tj-table-dim">{fmtNum(t.exitPrice, 2)}</td>
+                    <td className="tj-table-dim">{t.realizedR === null ? "—" : `${t.realizedR >= 0 ? "+" : ""}${fmtNum(t.realizedR, 2)}R`}</td>
+                    <td>
+                      <PnLText value={t.pnl} decimals={0} />
+                    </td>
+                    <td>
+                      {t.screenshot ? (
+                        <button
+                          type="button"
+                          className="tj-trade-thumb-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPreviewImage(t.screenshot);
+                          }}
+                          aria-label="View trade screenshot in full size"
+                        >
+                          <img className="tj-trade-thumb" src={t.screenshot} alt="Trade screenshot" />
+                        </button>
+                      ) : (
+                        <span className="tj-table-dim">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="tj-table-tags">
+                        {(t.tags || []).map((tid) => (tagById[tid] ? <span key={tid} title={tagById[tid].label}>{tagById[tid].emoji}</span> : null))}
+                      </div>
+                    </td>
+                    <td className="tj-table-dim">
+                      {t.confidenceBefore || t.confidenceAfter
+                        ? `${t.confidenceBefore || "–"}→${t.confidenceAfter || "–"}`
+                        : "—"}
+                    </td>
+                    <td>
+                      <Pencil size={14} className="tj-edit-icon" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {previewImage && (
+            <div className="tj-image-preview-backdrop" onClick={() => setPreviewImage(null)}>
+              <div className="tj-image-preview-modal" onClick={(e) => e.stopPropagation()}>
+                <button type="button" className="tj-icon-btn tj-image-preview-close" onClick={() => setPreviewImage(null)} aria-label="Close preview">
+                  <X size={18} />
+                </button>
+                <img src={previewImage} alt="Trade screenshot full size" />
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1696,6 +1720,50 @@ export default function TradingJournal() {
           border: 1px solid var(--border-strong);
           background: #0b0f0d;
           display: block;
+        }
+        .tj-trade-thumb-btn {
+          background: none;
+          border: none;
+          padding: 0;
+          cursor: pointer;
+          display: inline-flex;
+        }
+        .tj-image-preview-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(6, 9, 7, 0.8);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          z-index: 80;
+        }
+        .tj-image-preview-modal {
+          position: relative;
+          max-width: min(92vw, 780px);
+          max-height: 90vh;
+          background: var(--surface);
+          border: 1px solid var(--border-strong);
+          border-radius: 8px;
+          padding: 14px;
+          box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+        }
+        .tj-image-preview-modal img {
+          display: block;
+          max-width: 100%;
+          max-height: 82vh;
+          object-fit: contain;
+          border-radius: 4px;
+          background: #0b0f0d;
+        }
+        .tj-image-preview-close {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          background: rgba(15, 21, 18, 0.8);
+          border: 1px solid var(--border-strong);
+          color: var(--text);
+          z-index: 1;
         }
         .tj-table-row:hover { background: var(--surface-2); }
         .tj-table-row:last-child td { border-bottom: none; }
