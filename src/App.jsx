@@ -1420,6 +1420,7 @@ export default function TradingJournal() {
           width: 100%;
           min-height: 100%;
           background: #0F1512;
+          overflow-x: hidden;
         }
 
         body {
@@ -1719,14 +1720,15 @@ export default function TradingJournal() {
         @media (max-width: 760px) {
           .tj-app {
             flex-direction: column;
+            width: 100%;
           }
 
           .tj-sidebar {
             width: 100%;
             border-right: none;
             border-bottom: 1px solid var(--border);
-            padding: 18px 14px 14px;
-            gap: 16px;
+            padding: 12px 10px 10px;
+            gap: 12px;
           }
 
           .tj-wordmark {
@@ -1758,11 +1760,11 @@ export default function TradingJournal() {
           }
 
           .tj-main {
-            padding: 18px 14px 32px;
+            padding: 12px 10px 24px;
           }
 
           .tj-header {
-            margin-bottom: 18px;
+            margin-bottom: 12px;
           }
 
           .tj-header h1 {
@@ -1789,7 +1791,7 @@ export default function TradingJournal() {
           }
 
           .tj-panel {
-            padding: 14px 12px;
+            padding: 12px 10px;
           }
 
           .tj-panel-head {
