@@ -2,13 +2,13 @@
   "name": "Farley Trades",
   "short_name": "Farley Trades",
   "description": "A personal trading journal.",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#0F1512",
   "theme_color": "#0F1512",
   "icons": [
     {
-      "src": "/img/farley-trades%20image.png",
+      "src": "./img/farley-trades%20image.png",
       "sizes": "any",
       "type": "image/png",
       "purpose": "any maskable"
