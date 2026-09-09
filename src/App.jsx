@@ -1716,6 +1716,177 @@ export default function TradingJournal() {
         .tj-month-cell.tj-cal-loss { background: rgba(193,88,74,0.1); border-color: var(--loss-dim); }
         .tj-month-cell .tj-cal-amount { font-size: 15px; }
 
+        @media (max-width: 760px) {
+          .tj-app {
+            flex-direction: column;
+          }
+
+          .tj-sidebar {
+            width: 100%;
+            border-right: none;
+            border-bottom: 1px solid var(--border);
+            padding: 18px 14px 14px;
+            gap: 16px;
+          }
+
+          .tj-wordmark {
+            font-size: 22px;
+          }
+
+          .tj-nav {
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 8px;
+          }
+
+          .tj-nav-item {
+            flex: 1 1 calc(50% - 8px);
+            min-width: 120px;
+            justify-content: center;
+            padding: 10px 12px;
+          }
+
+          .tj-sidebar-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .tj-sidebar-actions .tj-btn {
+            width: 100%;
+            justify-content: center;
+          }
+
+          .tj-main {
+            padding: 18px 14px 32px;
+          }
+
+          .tj-header {
+            margin-bottom: 18px;
+          }
+
+          .tj-header h1 {
+            font-size: 22px;
+          }
+
+          .tj-header-actions {
+            width: 100%;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+          }
+
+          .tj-stat-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .tj-stat {
+            padding: 12px;
+          }
+
+          .tj-stat-value {
+            font-size: 17px;
+          }
+
+          .tj-panel {
+            padding: 14px 12px;
+          }
+
+          .tj-panel-head {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+          }
+
+          .tj-two-col {
+            grid-template-columns: 1fr;
+            gap: 14px;
+          }
+
+          .tj-inst-row {
+            grid-template-columns: 42px 1fr 60px 70px;
+            font-size: 11.5px;
+          }
+
+          .tj-filters {
+            flex-wrap: wrap;
+          }
+
+          .tj-filters select {
+            flex: 1 1 120px;
+          }
+
+          .tj-form-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .tj-modal {
+            max-width: 94vw;
+            padding: 18px 16px;
+          }
+
+          .tj-modal-actions {
+            flex-direction: column-reverse;
+            gap: 10px;
+          }
+
+          .tj-modal-actions > * {
+            width: 100%;
+            justify-content: center;
+          }
+
+          .tj-month-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .tj-week-row {
+            gap: 10px;
+            padding: 10px 12px;
+          }
+
+          .tj-week-label {
+            width: 90px;
+          }
+
+          .tj-week-stats {
+            gap: 6px;
+            font-size: 11px;
+          }
+
+          .tj-tag-new {
+            flex-wrap: wrap;
+          }
+
+          .tj-tag-new-label {
+            width: 70px;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .tj-sidebar-actions {
+            grid-template-columns: 1fr;
+          }
+
+          .tj-stat-row {
+            grid-template-columns: 1fr;
+          }
+
+          .tj-nav-item {
+            flex-basis: 100%;
+          }
+
+          .tj-header-actions {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .tj-header-actions .tj-btn,
+          .tj-header-actions .tj-sync-status,
+          .tj-header-actions .tj-import-msg {
+            width: 100%;
+          }
+        }
+
         input[type="file"] { display: none; }
       `}</style>
 
