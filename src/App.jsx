@@ -257,8 +257,8 @@ function persistLocalTags(tags) {
 
 function mergeById(primary, secondary) {
   const map = new Map();
-  [...primary, ...secondary].forEach((item) => {
-    if (item?.id) map.set(item.id, item);
+  [...secondary, ...primary].forEach((item) => {
+    if (item?.id && !map.has(item.id)) map.set(item.id, item);
   });
   return [...map.values()];
 }
@@ -715,7 +715,7 @@ function Dashboard({ trades, tagLibrary }) {
               "—"
             ) : (
               <span className={stats.streak > 0 ? "tj-pos" : "tj-neg"}>
-                {Math.abs(stats.streak)} {stats.streak > 0 ? "win" : "loss"}{Math.abs(stats.streak) > 1 ? "es" : ""}
+                {Math.abs(stats.streak)} {stats.streak > 0 ? "wins" : "losses"}
               </span>
             )
           }
