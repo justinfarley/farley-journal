@@ -1665,11 +1665,51 @@ export default function TradingJournal() {
           color: var(--text);
         }
         .tj-wordmark span { color: var(--accent); }
-        .tj-account-picker { display: flex; flex-direction: column; gap: 7px; }
-        .tj-account-label { color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
-        .tj-account-picker select { width: 100%; min-width: 0; }
-        .tj-account-actions { display: flex; align-items: center; gap: 4px; }
-        .tj-account-actions .tj-btn { flex: 1; justify-content: center; padding: 7px 8px; font-size: 11px; }
+        .tj-account-picker {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 12px;
+          border: 1px solid var(--border);
+          border-top: 2px solid var(--accent);
+          background: var(--surface);
+        }
+        .tj-account-label {
+          color: var(--text-faint);
+          font-size: 10px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+        .tj-account-picker select {
+          width: 100%;
+          min-width: 0;
+          padding: 8px 9px;
+          appearance: none;
+          background: var(--surface-2);
+          border: 1px solid var(--border-strong);
+          border-radius: 3px;
+          color: var(--text);
+          font: 12px var(--font-mono);
+          cursor: pointer;
+        }
+        .tj-account-picker select:hover,
+        .tj-account-picker select:focus { border-color: var(--accent); outline: none; }
+        .tj-account-actions { display: flex; align-items: center; gap: 6px; }
+        .tj-account-actions .tj-btn {
+          flex: 1;
+          justify-content: center;
+          padding: 7px 8px;
+          color: var(--text-dim);
+          font-size: 11px;
+        }
+        .tj-account-actions .tj-btn:hover { color: var(--text); }
+        .tj-account-actions .tj-icon-btn {
+          color: var(--text-faint);
+          border-color: var(--border);
+          padding: 7px;
+        }
+        .tj-account-actions .tj-icon-btn:hover { color: var(--loss); border-color: var(--loss-dim); }
         .tj-header-account { color: var(--text-dim); font-family: var(--font-mono); font-size: 12px; }
         .tj-nav { display: flex; flex-direction: column; gap: 2px; }
         .tj-nav-item {
