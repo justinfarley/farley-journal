@@ -119,7 +119,7 @@ export function signOut() {
 export async function loadCloudData() {
   const session = await refreshSessionIfNeeded();
   if (!session?.access_token) return null;
-  const rows = await request("/rest/v1/journal_data?select=trades,tags&limit=1");
+  const rows = await request("/rest/v1/journal_data?select=trades,accounts,tags&limit=1");
   if (!rows?.length) return { trades: [], tags: [] };
   return {
     accounts: Array.isArray(rows[0].accounts) && rows[0].accounts.length

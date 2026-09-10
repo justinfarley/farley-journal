@@ -10,6 +10,8 @@ create table if not exists public.journal_data (
 alter table public.journal_data
   add column if not exists accounts jsonb not null default '[]'::jsonb;
 
+notify pgrst, 'reload schema';
+
 alter table public.journal_data enable row level security;
 
 drop policy if exists "Users can read their own journal" on public.journal_data;
