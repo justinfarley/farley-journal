@@ -755,12 +755,12 @@ function Dashboard({ trades, tagLibrary }) {
   return (
     <div>
       <div className="tj-stat-row">
-        <StatBlock label="Total P&L" value={<PnLText value={stats.totalPnL} decimals={0} />} sub={`${stats.count} trades`} />
+        <StatBlock label="Total P&L" value={<PnLText value={stats.totalPnL} decimals={2} />} sub={`${stats.count} trades`} />
         <StatBlock
           label="Win rate"
           value={<span className={stats.winRate >= 50 ? "tj-pos" : "tj-neg"}>{fmtNum(stats.winRate, 1)}%</span>}
         />
-        <StatBlock label="Avg P&L / trade" value={<PnLText value={stats.avgPnL} decimals={0} />} />
+        <StatBlock label="Avg P&L / trade" value={<PnLText value={stats.avgPnL} decimals={2} />} />
         <StatBlock
           label="Avg R multiple"
           value={
@@ -788,8 +788,8 @@ function Dashboard({ trades, tagLibrary }) {
           label="Profit factor"
           value={stats.profitFactor === Infinity ? "∞" : fmtNum(stats.profitFactor, 2)}
         />
-        <StatBlock label="Best trade" value={<PnLText value={stats.best.pnl} decimals={0} />} sub={fmtDateShort(stats.best.date)} />
-        <StatBlock label="Worst trade" value={<PnLText value={stats.worst.pnl} decimals={0} />} sub={fmtDateShort(stats.worst.date)} />
+        <StatBlock label="Best trade" value={<PnLText value={stats.best.pnl} decimals={2} />} sub={fmtDateShort(stats.best.date)} />
+        <StatBlock label="Worst trade" value={<PnLText value={stats.worst.pnl} decimals={2} />} sub={fmtDateShort(stats.worst.date)} />
         <StatBlock
           label="Current streak"
           value={
@@ -825,14 +825,14 @@ function Dashboard({ trades, tagLibrary }) {
               tick={{ fill: "#8B968F", fontSize: 11 }}
               axisLine={false}
               tickLine={false}
-              tickFormatter={(v) => `$${v.toLocaleString()}`}
+              tickFormatter={(v) => `$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               width={70}
             />
             <ReferenceLine y={0} stroke="#3A453E" />
             <Tooltip
               contentStyle={{ background: "#151D18", border: "1px solid #2A342E", borderRadius: 3, fontFamily: "var(--font-mono)" }}
               labelStyle={{ color: "#8B968F" }}
-              formatter={(v) => [fmtMoney(v, { decimals: 0 }), "Cumulative"]}
+              formatter={(v) => [fmtMoney(v, { decimals: 2 }), "Cumulative"]}
             />
             <Area type="monotone" dataKey="cum" stroke={equityPositive ? "#4FAE7C" : "#C1584A"} strokeWidth={2} fill="url(#tjEquityFill)" />
           </AreaChart>
@@ -854,7 +854,7 @@ function Dashboard({ trades, tagLibrary }) {
               <Tooltip
                 contentStyle={{ background: "#151D18", border: "1px solid #2A342E", borderRadius: 3, fontFamily: "var(--font-mono)" }}
                 labelStyle={{ color: "#8B968F" }}
-                formatter={(v, n, p) => [fmtMoney(v, { decimals: 0 }), `${p.payload.count} trades`]}
+                formatter={(v, n, p) => [fmtMoney(v, { decimals: 2 }), `${p.payload.count} trades`]}
               />
               <Bar dataKey="pnl" radius={[2, 2, 0, 0]}>
                 {stats.dowData.map((d, i) => (
@@ -879,7 +879,7 @@ function Dashboard({ trades, tagLibrary }) {
                   <span className="tj-inst-name">{i}</span>
                   <span className="tj-inst-count">{d.count} trades</span>
                   <span className="tj-inst-wr">{fmtNum(wr, 0)}% win</span>
-                  <PnLText value={d.pnl} decimals={0} />
+                  <PnLText value={d.pnl} decimals={2} />
                 </div>
               );
             })}
@@ -904,7 +904,7 @@ function Dashboard({ trades, tagLibrary }) {
                   </span>
                   <span className="tj-inst-count">{r.count} trades</span>
                   <span className="tj-inst-wr">{fmtNum(wr, 0)}% win</span>
-                  <PnLText value={r.pnl} decimals={0} />
+                  <PnLText value={r.pnl} decimals={2} />
                 </div>
               );
             })}
@@ -1000,7 +1000,7 @@ function TradesTab({ trades, tagLibrary, onEdit }) {
                     <td className="tj-table-dim">{t.plannedR === null ? "—" : `1:${fmtNum(t.plannedR, 2)}`}</td>
                     <td className="tj-table-dim">{fmtMoney(Number(t.fees) || 0)}</td>
                     <td>
-                      <PnLText value={t.pnl} decimals={0} />
+                      <PnLText value={t.pnl} decimals={2} />
                     </td>
                     <td>
                       {t.screenshot ? (
@@ -1196,7 +1196,7 @@ function CalendarTab({ trades }) {
         </div>
         {mode !== "month" && (
           <div className="tj-cal-total">
-            Month total: <PnLText value={monthTotal.pnl} decimals={0} /> <span className="tj-panel-sub">({monthTotal.count} trades)</span>
+            Month total: <PnLText value={monthTotal.pnl} decimals={2} /> <span className="tj-panel-sub">({monthTotal.count} trades)</span>
           </div>
         )}
       </div>
@@ -1220,7 +1220,7 @@ function CalendarTab({ trades }) {
                   <span className="tj-cal-daynum">{c.d}</span>
                   {data ? (
                     <>
-                      <span className="tj-cal-amount">{fmtMoney(data.pnl, { decimals: 0 })}</span>
+                      <span className="tj-cal-amount">{fmtMoney(data.pnl, { decimals: 2 })}</span>
                       <span className="tj-cal-count">{data.count} trade{data.count > 1 ? "s" : ""}</span>
                     </>
                   ) : null}
@@ -1254,7 +1254,7 @@ function CalendarTab({ trades }) {
                 </div>
                 <div className="tj-week-stats">
                   <span className="tj-panel-sub">{wr.count} trade{wr.count === 1 ? "" : "s"}</span>
-                  {hasTrades ? <PnLText value={wr.pnl} decimals={0} /> : <span className="tj-neu">—</span>}
+                  {hasTrades ? <PnLText value={wr.pnl} decimals={2} /> : <span className="tj-neu">—</span>}
                 </div>
               </div>
             );
@@ -1271,7 +1271,7 @@ function CalendarTab({ trades }) {
                 <span className="tj-month-name">{m.name}</span>
                 {m.count > 0 ? (
                   <>
-                    <span className="tj-cal-amount">{fmtMoney(m.pnl, { decimals: 0 })}</span>
+                    <span className="tj-cal-amount">{fmtMoney(m.pnl, { decimals: 2 })}</span>
                     <span className="tj-cal-count">{m.count} trades</span>
                   </>
                 ) : (
