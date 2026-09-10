@@ -122,12 +122,16 @@ export async function loadCloudData() {
   const rows = await request("/rest/v1/journal_data?select=trades,tags&limit=1");
   if (!rows?.length) return { trades: [], tags: [] };
   return {
-    trades: Array.isArray(rows[0].trades) ? rows[0].trades : [],
+    accounts: Array.isArray(rows[0].accounts) && rows[0].accounts.length
+      ? rows[0].accounts
+      : Array.isArray(rows[0].trades) && rows[0].trades.length
+          ? [{ id: "account_default", name: "Main account", trades: rows[0].trades }]
+          : [],
     tags: Array.isArray(rows[0].tags) ? rows[0].tags : [],
   };
 }
 
-export async function saveCloudData(trades, tags) {
+export async function saveCloudData(accounts, tags) {
   const session = await refreshSessionIfNeeded();
   if (!session?.access_token) return;
   const userId = session.user?.id || session.user_id;
@@ -135,7 +139,7 @@ export async function saveCloudData(trades, tags) {
   await request("/rest/v1/journal_data?on_conflict=user_id", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ user_id: userId, trades, tags }),
+    body: JSON.stringify({ user_id: userId, accounts, trades: accounts[0]?.trades || [], tags }),
   });
 }
 

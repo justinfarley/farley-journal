@@ -2,9 +2,13 @@
 create table if not exists public.journal_data (
   user_id uuid primary key references auth.users(id) on delete cascade,
   trades jsonb not null default '[]'::jsonb,
+  accounts jsonb not null default '[]'::jsonb,
   tags jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+alter table public.journal_data
+  add column if not exists accounts jsonb not null default '[]'::jsonb;
 
 alter table public.journal_data enable row level security;
 

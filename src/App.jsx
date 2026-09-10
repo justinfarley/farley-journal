@@ -102,7 +102,7 @@ function computePnL(trade) {
   const contracts = Number(trade.contracts);
   if (!isFinite(entry) || !isFinite(exit) || !isFinite(contracts)) return 0;
   const diff = trade.direction === "Short" ? entry - exit : exit - entry;
-  return diff * contracts * pv;
+  return diff * contracts * pv - (Number(trade.fees) || 0);
 }
 
 function computeRPoints(trade) {
@@ -178,6 +178,8 @@ const CSV_FIELD_MAP = {
   sl: "slPrice",
   slprice: "slPrice",
   stoploss: "slPrice",
+  fees: "fees",
+  fee: "fees",
   notes: "notes",
   comment: "notes",
   comments: "notes",
@@ -194,6 +196,7 @@ function rowToTrade(row) {
     exitPrice: "",
     tpPrice: "",
     slPrice: "",
+    fees: 0,
     notes: "",
   };
   Object.entries(row).forEach(([rawKey, rawVal]) => {
@@ -225,6 +228,7 @@ function rowToTrade(row) {
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "tape:trades";
+const ACCOUNTS_STORAGE_KEY = "tape:accounts";
 const TAGS_STORAGE_KEY = "tape:tags";
 
 function loadLocalTrades() {
@@ -235,6 +239,15 @@ function loadLocalTrades() {
   } catch {
     return [];
   }
+}
+
+function loadLocalAccounts() {
+  try {
+    const raw = window.localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed) && parsed.length) return parsed;
+  } catch {}
+  return [{ id: "account_default", name: "Main account", trades: loadLocalTrades() }];
 }
 
 function loadLocalTags() {
@@ -249,6 +262,21 @@ function loadLocalTags() {
 
 function persistLocalTrades(trades) {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trades)); } catch {}
+}
+
+function persistLocalAccounts(accounts) {
+  try { window.localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts)); } catch {}
+}
+
+function normalizeAccounts(accounts) {
+  if (!Array.isArray(accounts) || !accounts.length) {
+    return [{ id: "account_default", name: "Main account", trades: [] }];
+  }
+  return accounts.map((account, index) => ({
+    id: account.id || `account_${index}`,
+    name: String(account.name || `Account ${index + 1}`),
+    trades: Array.isArray(account.trades) ? account.trades : [],
+  }));
 }
 
 function persistLocalTags(tags) {
@@ -323,6 +351,7 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
         exitPrice: "",
         tpPrice: "",
         slPrice: "",
+        fees: 0,
         notes: "",
         screenshot: "",
         tags: [],
@@ -374,7 +403,7 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
   const previewPnl = useMemo(() => {
     if (!form.entryPrice || !form.exitPrice || !form.contracts) return null;
     return computePnL(form);
-  }, [form.entryPrice, form.exitPrice, form.contracts, form.direction, form.instrument]);
+  }, [form.entryPrice, form.exitPrice, form.contracts, form.direction, form.instrument, form.fees]);
 
   const submit = () => {
     if (!form.date) return setError("Pick a date.");
@@ -390,6 +419,7 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
       exitPrice: Number(form.exitPrice),
       tpPrice: form.tpPrice === "" ? "" : Number(form.tpPrice),
       slPrice: form.slPrice === "" ? "" : Number(form.slPrice),
+      fees: form.fees === "" ? 0 : Number(form.fees),
       screenshot: form.screenshot || "",
     });
   };
@@ -469,6 +499,11 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
           <label className="tj-field">
             <span>Stop-loss price</span>
             <input type="number" step="0.01" value={form.slPrice} onChange={set("slPrice")} placeholder="optional" />
+          </label>
+
+          <label className="tj-field">
+            <span>Fees</span>
+            <input type="number" min="0" step="0.01" value={form.fees} onChange={set("fees")} placeholder="0.00" />
           </label>
 
           <label className="tj-field tj-field-wide">
@@ -617,6 +652,10 @@ function Dashboard({ trades, tagLibrary }) {
     const worst = trades.reduce((m, t) => (t.pnl < m.pnl ? t : m), trades[0]);
     const rValues = trades.map((t) => t.realizedR).filter((r) => r !== null && isFinite(r));
     const avgR = rValues.length ? rValues.reduce((s, r) => s + r, 0) / rValues.length : null;
+    const plannedRValues = trades.map((t) => t.plannedR).filter((r) => r !== null && isFinite(r));
+    const avgPlannedR = plannedRValues.length
+      ? plannedRValues.reduce((s, r) => s + r, 0) / plannedRValues.length
+      : null;
     const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
     const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
     const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
@@ -688,6 +727,7 @@ function Dashboard({ trades, tagLibrary }) {
       best,
       worst,
       avgR,
+      avgPlannedR,
       profitFactor,
       avgWin,
       avgLoss,
@@ -731,6 +771,16 @@ function Dashboard({ trades, tagLibrary }) {
                 {stats.avgR >= 0 ? "+" : ""}
                 {fmtNum(stats.avgR, 2)}R
               </span>
+            )
+          }
+        />
+        <StatBlock
+          label="Avg planned RR"
+          value={
+            stats.avgPlannedR === null ? (
+              "—"
+            ) : (
+              <span className="tj-pos">1:{fmtNum(stats.avgPlannedR, 2)}</span>
             )
           }
         />
@@ -925,6 +975,8 @@ function TradesTab({ trades, tagLibrary, onEdit }) {
                   <th>Entry</th>
                   <th>Exit</th>
                   <th>R</th>
+                  <th>Planned RR</th>
+                  <th>Fees</th>
                   <th>P&amp;L</th>
                   <th>Image</th>
                   <th>Tags</th>
@@ -945,6 +997,8 @@ function TradesTab({ trades, tagLibrary, onEdit }) {
                     <td className="tj-table-dim">{fmtNum(t.entryPrice, 2)}</td>
                     <td className="tj-table-dim">{fmtNum(t.exitPrice, 2)}</td>
                     <td className="tj-table-dim">{t.realizedR === null ? "—" : `${t.realizedR >= 0 ? "+" : ""}${fmtNum(t.realizedR, 2)}R`}</td>
+                    <td className="tj-table-dim">{t.plannedR === null ? "—" : `1:${fmtNum(t.plannedR, 2)}`}</td>
+                    <td className="tj-table-dim">{fmtMoney(Number(t.fees) || 0)}</td>
                     <td>
                       <PnLText value={t.pnl} decimals={0} />
                     </td>
@@ -1237,7 +1291,8 @@ function CalendarTab({ trades }) {
 // ---------------------------------------------------------------------------
 
 export default function TradingJournal() {
-  const [rawTrades, setRawTrades] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [selectedAccountId, setSelectedAccountId] = useState(null);
   const [tagLibrary, setTagLibrary] = useState(DEFAULT_TAGS);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
@@ -1253,13 +1308,13 @@ export default function TradingJournal() {
   const [importMsg, setImportMsg] = useState("");
   const fileInputRef = useRef(null);
 
-  const sync = useCallback(async (nextTrades, nextTags) => {
-    persistLocalTrades(nextTrades);
+  const sync = useCallback(async (nextAccounts, nextTags) => {
+    persistLocalAccounts(nextAccounts);
     persistLocalTags(nextTags);
     if (!session || !cloudConfigured) return;
     setSyncing(true);
     try {
-      await saveCloudData(nextTrades, nextTags);
+      await saveCloudData(nextAccounts, nextTags);
     } catch (e) {
       setImportMsg(`Saved locally; cloud sync failed: ${e.message}`);
     } finally {
@@ -1272,7 +1327,9 @@ export default function TradingJournal() {
     (async () => {
       if (!cloudConfigured) {
         if (mounted) {
-          setRawTrades(loadLocalTrades());
+          const localAccounts = normalizeAccounts(loadLocalAccounts());
+          setAccounts(localAccounts);
+          setSelectedAccountId(localAccounts[0].id);
           setTagLibrary(loadLocalTags());
           setLoading(false);
         }
@@ -1285,20 +1342,22 @@ export default function TradingJournal() {
           setSession(current);
           const cloud = await loadCloudData();
           if (!mounted) return;
-          const localTrades = loadLocalTrades();
+          const localAccounts = loadLocalAccounts();
           const localTags = loadLocalTags();
-          const cloudTrades = Array.isArray(cloud?.trades) ? cloud.trades : [];
+          const cloudAccounts = normalizeAccounts(cloud?.accounts?.length ? cloud.accounts : localAccounts);
           const cloudTags = Array.isArray(cloud?.tags) ? cloud.tags : [];
-          const sourceTrades = cloudTrades.length ? cloudTrades : localTrades;
           const sourceTags = cloudTags.length ? cloudTags : (localTags.length ? localTags : DEFAULT_TAGS);
 
-          setRawTrades(sourceTrades);
+          setAccounts(cloudAccounts);
+          setSelectedAccountId(cloudAccounts[0].id);
           setTagLibrary(sourceTags);
-          await saveCloudData(sourceTrades, sourceTags);
-          persistLocalTrades(sourceTrades);
+          await saveCloudData(cloudAccounts, sourceTags);
+          persistLocalAccounts(cloudAccounts);
           persistLocalTags(sourceTags);
         } else {
-          setRawTrades([]);
+          const emptyAccounts = normalizeAccounts([]);
+          setAccounts(emptyAccounts);
+          setSelectedAccountId(emptyAccounts[0].id);
           setTagLibrary(DEFAULT_TAGS);
         }
       } catch (e) {
@@ -1318,7 +1377,7 @@ export default function TradingJournal() {
     if (authPassword.length < 6) return setAuthError("Password must be at least 6 characters.");
     setLoading(true);
     try {
-      const localTrades = loadLocalTrades();
+      const localAccounts = loadLocalAccounts();
       const localTags = loadLocalTags();
       const data = authMode === "signup" ? await signUp(authEmail, authPassword) : await signIn(authEmail, authPassword);
       if (!data?.access_token) {
@@ -1329,15 +1388,15 @@ export default function TradingJournal() {
       const current = await getCurrentSession();
       setSession(current);
       const cloud = await loadCloudData();
-      const cloudTrades = Array.isArray(cloud?.trades) ? cloud.trades : [];
+      const cloudAccounts = normalizeAccounts(cloud?.accounts?.length ? cloud.accounts : localAccounts);
       const cloudTags = Array.isArray(cloud?.tags) ? cloud.tags : [];
-      const sourceTrades = cloudTrades.length ? cloudTrades : localTrades;
       const sourceTags = cloudTags.length ? cloudTags : (localTags.length ? localTags : DEFAULT_TAGS);
 
-      setRawTrades(sourceTrades);
+      setAccounts(cloudAccounts);
+      setSelectedAccountId(cloudAccounts[0].id);
       setTagLibrary(sourceTags);
-      await saveCloudData(sourceTrades, sourceTags);
-      persistLocalTrades(sourceTrades);
+      await saveCloudData(cloudAccounts, sourceTags);
+      persistLocalAccounts(cloudAccounts);
       persistLocalTags(sourceTags);
     } catch (e2) {
       setAuthError(e2.message);
@@ -1349,27 +1408,48 @@ export default function TradingJournal() {
   const handleSignOut = () => {
     signOut();
     setSession(null);
-    setRawTrades([]);
+    setAccounts([]);
+    setSelectedAccountId(null);
     setTagLibrary(DEFAULT_TAGS);
   };
 
   const handleCreateTag = useCallback((tag) => {
     setTagLibrary((prev) => {
       const next = [...prev, tag];
-      sync(rawTrades, next);
+      sync(accounts, next);
       return next;
     });
-  }, [rawTrades, sync]);
+  }, [accounts, sync]);
 
   const handleDeleteTag = useCallback((tagId) => {
     setTagLibrary((prev) => {
       const next = prev.filter((t) => t.id !== tagId);
-      sync(rawTrades, next);
+      sync(accounts, next);
       return next;
     });
-  }, [rawTrades, sync]);
+  }, [accounts, sync]);
 
+  const activeAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0];
+  const rawTrades = activeAccount?.trades || [];
   const trades = useMemo(() => rawTrades.map(enrichTrade), [rawTrades]);
+
+  const handleCreateAccount = () => {
+    const name = window.prompt("Account name", `Account ${accounts.length + 1}`)?.trim();
+    if (!name) return;
+    const account = { id: uid(), name, trades: [] };
+    const next = [...accounts, account];
+    setAccounts(next);
+    setSelectedAccountId(account.id);
+    sync(next, tagLibrary);
+  };
+
+  const handleDeleteAccount = () => {
+    if (!activeAccount || !window.confirm(`Delete ${activeAccount.name} and all its trades?`)) return;
+    const next = accounts.filter((account) => account.id !== activeAccount.id);
+    setAccounts(next);
+    setSelectedAccountId(next[0]?.id || null);
+    sync(next, tagLibrary);
+  };
 
   const handleAddNew = () => {
     setEditingTrade(null);
@@ -1382,9 +1462,13 @@ export default function TradingJournal() {
   };
 
   const handleSave = (trade) => {
-    setRawTrades((prev) => {
-      const exists = prev.some((t) => t.id === trade.id);
-      const next = exists ? prev.map((t) => (t.id === trade.id ? trade : t)) : [...prev, trade];
+    setAccounts((prev) => {
+      const next = prev.map((account) => {
+        if (account.id !== activeAccount?.id) return account;
+        const exists = account.trades.some((t) => t.id === trade.id);
+        const nextTrades = exists ? account.trades.map((t) => (t.id === trade.id ? trade : t)) : [...account.trades, trade];
+        return { ...account, trades: nextTrades };
+      });
       sync(next, tagLibrary);
       return next;
     });
@@ -1393,8 +1477,10 @@ export default function TradingJournal() {
   };
 
   const handleDelete = (id) => {
-    setRawTrades((prev) => {
-      const next = prev.filter((t) => t.id !== id);
+    setAccounts((prev) => {
+      const next = prev.map((account) => account.id === activeAccount?.id
+        ? { ...account, trades: account.trades.filter((t) => t.id !== id) }
+        : account);
       sync(next, tagLibrary);
       return next;
     });
@@ -1416,9 +1502,12 @@ export default function TradingJournal() {
         if (parsed.length === 0) {
           setImportMsg("No valid rows found. Check your CSV columns.");
         } else {
-          setRawTrades((prev) => {
-            const existingIds = new Set(prev.map((t) => t.id));
-            const next = [...prev, ...parsed.filter((t) => !existingIds.has(t.id))];
+          setAccounts((prev) => {
+            const existingIds = new Set(rawTrades.map((t) => t.id));
+            const imported = parsed.filter((t) => !existingIds.has(t.id));
+            const next = prev.map((account) => account.id === activeAccount?.id
+              ? { ...account, trades: [...account.trades, ...imported] }
+              : account);
             sync(next, tagLibrary);
             return next;
           });
@@ -1433,8 +1522,8 @@ export default function TradingJournal() {
 
   const downloadTemplate = () => {
     const csv =
-      "date,instrument,direction,contracts,entry,exit,tp,sl,notes\n" +
-      "2026-09-08,NQ,Long,1,19850.25,19875.00,19900.00,19825.00,Example trade\n";
+      "date,instrument,direction,contracts,entry,exit,tp,sl,fees,notes\n" +
+      "2026-09-08,NQ,Long,1,19850.25,19875.00,19900.00,19825.00,4.00,Example trade\n";
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1576,6 +1665,12 @@ export default function TradingJournal() {
           color: var(--text);
         }
         .tj-wordmark span { color: var(--accent); }
+        .tj-account-picker { display: flex; flex-direction: column; gap: 7px; }
+        .tj-account-label { color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+        .tj-account-picker select { width: 100%; min-width: 0; }
+        .tj-account-actions { display: flex; align-items: center; gap: 4px; }
+        .tj-account-actions .tj-btn { flex: 1; justify-content: center; padding: 7px 8px; font-size: 11px; }
+        .tj-header-account { color: var(--text-dim); font-family: var(--font-mono); font-size: 12px; }
         .tj-nav { display: flex; flex-direction: column; gap: 2px; }
         .tj-nav-item {
           display: flex;
@@ -1619,6 +1714,7 @@ export default function TradingJournal() {
         .tj-btn-primary:hover { filter: brightness(1.08); }
         .tj-btn-danger { color: var(--loss); border-color: var(--loss-dim); background: transparent; }
         .tj-btn-danger:hover { border-color: var(--loss); }
+        .tj-btn:disabled, .tj-icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .tj-icon-btn {
           background: none; border: 1px solid transparent; color: var(--text-dim);
           cursor: pointer; padding: 6px; border-radius: 3px; display: inline-flex;
@@ -2105,6 +2201,16 @@ export default function TradingJournal() {
         <div className="tj-wordmark">
           Farley Trades<span>.</span>
         </div>
+        <div className="tj-account-picker">
+          <div className="tj-account-label">Account</div>
+          <select value={activeAccount?.id || ""} onChange={(e) => setSelectedAccountId(e.target.value)}>
+            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+          </select>
+          <div className="tj-account-actions">
+            <button className="tj-btn" onClick={handleCreateAccount}><Plus size={13} /> New account</button>
+            <button className="tj-icon-btn" onClick={handleDeleteAccount} disabled={!activeAccount} aria-label="Delete account" title="Delete account"><Trash2 size={14} /></button>
+          </div>
+        </div>
         <nav className="tj-nav">
           <button className={`tj-nav-item ${tab === "dashboard" ? "tj-nav-active" : ""}`} onClick={() => setTab("dashboard")}>
             <LayoutGrid size={15} /> Dashboard
@@ -2117,7 +2223,7 @@ export default function TradingJournal() {
           </button>
         </nav>
         <div className="tj-sidebar-actions">
-          <button className="tj-btn tj-btn-primary" onClick={handleAddNew}>
+          <button className="tj-btn tj-btn-primary" onClick={handleAddNew} disabled={!activeAccount}>
             <Plus size={14} /> Log trade
           </button>
           <button className="tj-btn" onClick={() => fileInputRef.current?.click()}>
@@ -2132,7 +2238,7 @@ export default function TradingJournal() {
 
       <main className="tj-main">
         <div className="tj-header">
-          <h1>{tabLabel}</h1>
+          <h1>{tabLabel}<span className="tj-header-account"> / {activeAccount?.name || "No account"}</span></h1>
           <div className="tj-header-actions">
             {importMsg ? <span className="tj-import-msg">{importMsg}</span> : null}
             {cloudConfigured && session ? <><span className="tj-sync-status">{syncing ? "Syncing…" : "Cloud synced"}</span><button className="tj-btn" onClick={handleSignOut}>Sign out</button></> : null}
