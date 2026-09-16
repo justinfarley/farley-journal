@@ -1829,6 +1829,19 @@ export default function TradingJournal() {
         .tj-panel-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
         .tj-panel-head h3 { font-family: var(--font-serif); font-weight: 500; font-size: 16px; margin: 0; }
         .tj-panel-sub { font-size: 11.5px; color: var(--text-dim); }
+        .tj-goal-panel { border-top: 2px solid var(--accent); }
+        .tj-goal-input-label { display: flex; align-items: center; gap: 8px; color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+        .tj-goal-input-label input {
+          width: 118px; padding: 8px 9px; background: var(--surface-2); border: 1px solid var(--border-strong);
+          border-radius: 3px; color: var(--text); font: 13px var(--font-mono); text-align: right;
+        }
+        .tj-goal-input-label input:hover,
+        .tj-goal-input-label input:focus { border-color: var(--accent); outline: none; }
+        .tj-goal-input-label input::placeholder { color: var(--text-faint); }
+        .tj-goal-track { height: 9px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 2px; }
+        .tj-goal-fill { height: 100%; min-width: 2px; background: var(--gain); transition: width 180ms ease; }
+        .tj-goal-fill-complete { background: var(--accent); }
+        .tj-goal-summary { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; font-size: 13px; }
         .tj-two-col { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
         @media (max-width: 900px) { .tj-two-col { grid-template-columns: 1fr; } }
 
@@ -2143,6 +2156,10 @@ export default function TradingJournal() {
             align-items: flex-start;
             gap: 4px;
           }
+
+          .tj-goal-input-label { width: 100%; justify-content: space-between; margin-top: 6px; }
+          .tj-goal-input-label input { width: min(100%, 180px); }
+          .tj-goal-summary { align-items: flex-start; flex-direction: column; gap: 3px; }
 
           .tj-cal-controls {
             flex-direction: column;
