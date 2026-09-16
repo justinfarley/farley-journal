@@ -648,7 +648,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
   const weeklyProfit = trades.filter((trade) => trade.date >= weekStart).reduce((sum, trade) => sum + trade.pnl, 0);
   const goalValue = Number(weeklyGoal) || 0;
   const goalProgress = goalValue > 0 ? (weeklyProfit / goalValue) * 100 : 0;
-  const goalBarWidth = Math.min(Math.abs(goalProgress), 100) / 2;
+  const goalBarWidth = Math.min(Math.abs(goalProgress), 100);
 
   const stats = useMemo(() => {
     if (trades.length === 0) return null;
