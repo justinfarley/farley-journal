@@ -95,6 +95,14 @@ function fmtDateShort(dateStr) {
   return `${MONTH_NAMES[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
 }
 
+function getWeekStartDate() {
+  const today = new Date();
+  const day = today.getDay();
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  today.setDate(today.getDate() - daysSinceMonday);
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+}
+
 function computePnL(trade) {
   const pv = POINT_VALUE[trade.instrument] ?? 0;
   const entry = Number(trade.entryPrice);
@@ -276,6 +284,7 @@ function normalizeAccounts(accounts) {
     id: account.id || `account_${index}`,
     name: String(account.name || `Account ${index + 1}`),
     trades: Array.isArray(account.trades) ? account.trades : [],
+    weeklyGoal: Number(account.weeklyGoal) > 0 ? Number(account.weeklyGoal) : "",
   }));
 }
 
@@ -634,7 +643,12 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
 // Dashboard
 // ---------------------------------------------------------------------------
 
-function Dashboard({ trades, tagLibrary }) {
+function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
+  const weekStart = getWeekStartDate();
+  const weeklyProfit = trades.filter((trade) => trade.date >= weekStart).reduce((sum, trade) => sum + trade.pnl, 0);
+  const goalValue = Number(weeklyGoal) || 0;
+  const goalProgress = goalValue > 0 ? (weeklyProfit / goalValue) * 100 : 0;
+
   const stats = useMemo(() => {
     if (trades.length === 0) return null;
     const sorted = [...trades].sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -741,19 +755,42 @@ function Dashboard({ trades, tagLibrary }) {
     };
   }, [trades, tagLibrary]);
 
-  if (!stats) {
-    return (
-      <div className="tj-empty">
-        <h2>No trades logged yet</h2>
-        <p>Add your first trade or import a CSV to see your performance take shape here.</p>
-      </div>
-    );
-  }
+  if (!stats) return <div className="tj-empty"><h2>No trades logged yet</h2><p>Add your first trade or import a CSV to see your performance take shape here.</p></div>;
 
   const equityPositive = stats.totalPnL >= 0;
 
   return (
     <div>
+      <div className="tj-panel tj-goal-panel">
+        <div className="tj-panel-head">
+          <div>
+            <h3>Weekly profit goal</h3>
+            <span className="tj-panel-sub">Monday through today</span>
+          </div>
+          <label className="tj-goal-input-label">
+            <span>Goal</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={weeklyGoal}
+              onChange={(event) => onWeeklyGoalChange(event.target.value)}
+              placeholder="0.00"
+              aria-label="Weekly profit goal"
+            />
+          </label>
+        </div>
+        <div className="tj-goal-track" aria-label={`${fmtMoney(weeklyProfit)} of ${fmtMoney(goalValue)} weekly profit goal`}>
+          <div className={`tj-goal-fill ${goalProgress >= 100 ? "tj-goal-fill-complete" : ""}`} style={{ width: `${Math.max(0, Math.min(goalProgress, 100))}%` }} />
+        </div>
+        <div className="tj-goal-summary">
+          <PnLText value={weeklyProfit} decimals={2} />
+          <span className="tj-panel-sub">
+            {goalValue > 0 ? `${fmtNum(Math.max(0, goalProgress), 0)}% of ${fmtMoney(goalValue)} goal` : "Set a goal to track this week"}
+          </span>
+        </div>
+      </div>
+
       <div className="tj-stat-row">
         <StatBlock label="Total P&L" value={<PnLText value={stats.totalPnL} decimals={2} />} sub={`${stats.count} trades`} />
         <StatBlock
@@ -1436,7 +1473,7 @@ export default function TradingJournal() {
   const handleCreateAccount = () => {
     const name = window.prompt("Account name", `Account ${accounts.length + 1}`)?.trim();
     if (!name) return;
-    const account = { id: uid(), name, trades: [] };
+    const account = { id: uid(), name, trades: [], weeklyGoal: "" };
     const next = [...accounts, account];
     setAccounts(next);
     setSelectedAccountId(account.id);
@@ -1449,6 +1486,16 @@ export default function TradingJournal() {
     setAccounts(next);
     setSelectedAccountId(next[0]?.id || null);
     sync(next, tagLibrary);
+  };
+
+  const handleWeeklyGoalChange = (value) => {
+    setAccounts((prev) => {
+      const next = prev.map((account) => account.id === activeAccount?.id
+        ? { ...account, weeklyGoal: value }
+        : account);
+      sync(next, tagLibrary);
+      return next;
+    });
   };
 
   const handleAddNew = () => {
@@ -2291,7 +2338,14 @@ export default function TradingJournal() {
           </div>
         ) : (
           <>
-            {tab === "dashboard" && <Dashboard trades={trades} tagLibrary={tagLibrary} />}
+            {tab === "dashboard" && (
+              <Dashboard
+                trades={trades}
+                tagLibrary={tagLibrary}
+                weeklyGoal={activeAccount?.weeklyGoal || ""}
+                onWeeklyGoalChange={handleWeeklyGoalChange}
+              />
+            )}
             {tab === "trades" && <TradesTab trades={trades} tagLibrary={tagLibrary} onEdit={handleEdit} />}
             {tab === "calendar" && <CalendarTab trades={trades} />}
           </>
