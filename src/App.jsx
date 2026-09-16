@@ -648,6 +648,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
   const weeklyProfit = trades.filter((trade) => trade.date >= weekStart).reduce((sum, trade) => sum + trade.pnl, 0);
   const goalValue = Number(weeklyGoal) || 0;
   const goalProgress = goalValue > 0 ? (weeklyProfit / goalValue) * 100 : 0;
+  const goalBarWidth = Math.min(Math.abs(goalProgress), 100) / 2;
 
   const stats = useMemo(() => {
     if (trades.length === 0) return null;
@@ -780,8 +781,18 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
             />
           </label>
         </div>
-        <div className="tj-goal-track" aria-label={`${fmtMoney(weeklyProfit)} of ${fmtMoney(goalValue)} weekly profit goal`}>
-          <div className={`tj-goal-fill ${goalProgress >= 100 ? "tj-goal-fill-complete" : ""}`} style={{ width: `${Math.max(0, Math.min(goalProgress, 100))}%` }} />
+        <div
+          className="tj-goal-track"
+          title={`Progress towards the goal: ${fmtMoney(weeklyProfit)} of ${fmtMoney(goalValue)}`}
+          aria-label={`Progress towards the goal: ${fmtMoney(weeklyProfit)} of ${fmtMoney(goalValue)}`}
+        >
+          <div className="tj-goal-half tj-goal-half-left">
+            {weeklyProfit < 0 ? <div className="tj-goal-fill tj-goal-fill-loss" style={{ width: `${goalBarWidth}%` }} /> : null}
+          </div>
+          <div className="tj-goal-center" />
+          <div className="tj-goal-half tj-goal-half-right">
+            {weeklyProfit > 0 ? <div className={`tj-goal-fill ${goalProgress >= 100 ? "tj-goal-fill-complete" : ""}`} style={{ width: `${goalBarWidth}%` }} /> : null}
+          </div>
         </div>
         <div className="tj-goal-summary">
           <PnLText value={weeklyProfit} decimals={2} />
@@ -1679,6 +1690,7 @@ export default function TradingJournal() {
           --font-serif: 'Fraunces', serif;
           --font-mono: 'IBM Plex Mono', monospace;
 
+          color-scheme: dark;
           display: flex;
           min-height: 100vh;
           width: 100%;
@@ -1689,6 +1701,15 @@ export default function TradingJournal() {
           box-sizing: border-box;
         }
         .tj-app * { box-sizing: border-box; }
+        .tj-app button, .tj-app input, .tj-app select, .tj-app textarea {
+          font: inherit;
+        }
+        .tj-app button, .tj-app select, .tj-app input, .tj-app textarea {
+          transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+        }
+        .tj-app button:hover, .tj-app select:hover, .tj-app input:hover, .tj-app textarea:hover {
+          border-color: var(--border-strong);
+        }
         .tj-pos { color: var(--gain); }
         .tj-neg { color: var(--loss); }
         .tj-neu { color: var(--text-faint); }
@@ -1795,8 +1816,9 @@ export default function TradingJournal() {
           border: 1px solid var(--border-strong);
           padding: 8px 14px; border-radius: 3px; cursor: pointer;
           font-family: var(--font-mono); font-size: 12.5px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
         }
-        .tj-btn:hover { border-color: var(--accent); }
+        .tj-btn:hover { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(217,168,78,0.12); }
         .tj-btn-primary { background: var(--accent); color: #241a06; border-color: var(--accent); font-weight: 600; }
         .tj-btn-primary:hover { filter: brightness(1.08); }
         .tj-btn-danger { color: var(--loss); border-color: var(--loss-dim); background: transparent; }
@@ -1825,7 +1847,7 @@ export default function TradingJournal() {
         .tj-stat-sub { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
 
         /* Panels */
-        .tj-panel { border: 1px solid var(--border); padding: 18px 20px; margin-bottom: 20px; background: var(--surface); }
+        .tj-panel { border: 1px solid var(--border); padding: 18px 20px; margin-bottom: 20px; background: var(--surface); box-shadow: 0 10px 20px rgba(0,0,0,0.08); }
         .tj-panel-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
         .tj-panel-head h3 { font-family: var(--font-serif); font-weight: 500; font-size: 16px; margin: 0; }
         .tj-panel-sub { font-size: 11.5px; color: var(--text-dim); }
@@ -1838,9 +1860,13 @@ export default function TradingJournal() {
         .tj-goal-input-label input:hover,
         .tj-goal-input-label input:focus { border-color: var(--accent); outline: none; }
         .tj-goal-input-label input::placeholder { color: var(--text-faint); }
-        .tj-goal-track { height: 9px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 2px; }
+        .tj-goal-track { position: relative; display: flex; height: 11px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 2px; cursor: help; }
+        .tj-goal-half { display: flex; width: 50%; height: 100%; }
+        .tj-goal-half-left { justify-content: flex-end; }
         .tj-goal-fill { height: 100%; min-width: 2px; background: var(--gain); transition: width 180ms ease; }
+        .tj-goal-fill-loss { background: var(--loss); }
         .tj-goal-fill-complete { background: var(--accent); }
+        .tj-goal-center { position: absolute; top: -1px; bottom: -1px; left: 50%; width: 2px; transform: translateX(-50%); background: var(--text); opacity: 0.9; }
         .tj-goal-summary { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; font-size: 13px; }
         .tj-two-col { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
         @media (max-width: 900px) { .tj-two-col { grid-template-columns: 1fr; } }
@@ -1976,7 +2002,8 @@ export default function TradingJournal() {
         .tj-modal {
           background: var(--surface); border: 1px solid var(--border-strong);
           width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto;
-          padding: 24px 26px; border-radius: 4px;
+          padding: 24px 26px; border-radius: 6px;
+          box-shadow: 0 18px 44px rgba(0,0,0,0.28);
         }
         .tj-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
         .tj-modal-head h3 { font-family: var(--font-serif); font-weight: 500; font-size: 18px; margin: 0; }
@@ -1986,8 +2013,12 @@ export default function TradingJournal() {
         .tj-field input, .tj-field select, .tj-field textarea {
           background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
           padding: 9px 10px; border-radius: 3px; font-family: var(--font-mono); font-size: 13px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
         }
-        .tj-field input:focus, .tj-field select:focus, .tj-field textarea:focus { outline: none; border-color: var(--accent); }
+        .tj-field input::placeholder, .tj-field textarea::placeholder {
+          color: var(--text-faint);
+        }
+        .tj-field input:focus, .tj-field select:focus, .tj-field textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px rgba(217,168,78,0.15); }
         .tj-field input:disabled { color: var(--text-faint); }
         .tj-toggle-pair { display: flex; gap: 8px; }
         .tj-toggle-btn {
