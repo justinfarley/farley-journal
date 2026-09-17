@@ -149,6 +149,15 @@ function enrichTrade(trade) {
   };
 }
 
+function compareTradesDesc(a, b) {
+  if (a.date !== b.date) return a.date > b.date ? -1 : 1;
+  return String(b.id || "").localeCompare(String(a.id || ""));
+}
+
+function compareTradesAsc(a, b) {
+  return compareTradesDesc(b, a);
+}
+
 function csvHeaderKey(h) {
   return String(h || "").toLowerCase().replace(/[\s_]+/g, "");
 }
@@ -652,7 +661,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
 
   const stats = useMemo(() => {
     if (trades.length === 0) return null;
-    const sorted = [...trades].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const sorted = [...trades].sort(compareTradesAsc);
     let cum = 0;
     const equity = sorted.map((t) => {
       cum += t.pnl;
@@ -678,7 +687,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
     const avgLoss = losses.length ? grossLoss / losses.length : 0;
 
     // streak (most recent first)
-    const byDateDesc = [...trades].sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0));
+    const byDateDesc = [...trades].sort(compareTradesDesc);
     let streak = 0;
     if (byDateDesc.length) {
       const dir = byDateDesc[0].pnl >= 0 ? 1 : -1;
@@ -978,7 +987,7 @@ function TradesTab({ trades, tagLibrary, onEdit }) {
   const [previewImage, setPreviewImage] = useState(null);
 
   const filtered = useMemo(() => {
-    let list = [...trades].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    let list = [...trades].sort(compareTradesDesc);
     if (filterInst !== "all") list = list.filter((t) => t.instrument === filterInst);
     if (filterResult === "wins") list = list.filter((t) => t.pnl > 0);
     if (filterResult === "losses") list = list.filter((t) => t.pnl < 0);
