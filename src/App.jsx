@@ -356,7 +356,7 @@ function ConfidenceDots({ value, onChange }) {
   );
 }
 
-function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCancel, onDelete }) {
+function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCreateTag, onDeleteTag, onSave, onCancel, onDelete }) {
   const [form, setForm] = useState(
     () =>
       initial || {
@@ -381,6 +381,8 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
   const [newTagOpen, setNewTagOpen] = useState(false);
   const [newTagEmoji, setNewTagEmoji] = useState("");
   const [newTagLabel, setNewTagLabel] = useState("");
+  const [exitPriceMode, setExitPriceMode] = useState("");
+  const [addToAllAccounts, setAddToAllAccounts] = useState(false);
 
   const handleScreenshot = (event) => {
     const file = event.target.files?.[0];
@@ -418,6 +420,31 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
     setForm((f) => ({ ...f, [k]: v }));
   };
 
+  const setExitPrice = (e) => {
+    setExitPriceMode("");
+    set("exitPrice")(e);
+  };
+
+  const setPriceWithExitSync = (key) => (e) => {
+    const value = e.target.value;
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      if ((key === "slPrice" && exitPriceMode === "stopLoss") || (key === "tpPrice" && exitPriceMode === "takeProfit")) {
+        next.exitPrice = value;
+      }
+      return next;
+    });
+  };
+
+  const toggleExitPriceMode = (mode) => {
+    const nextMode = exitPriceMode === mode ? "" : mode;
+    setExitPriceMode(nextMode);
+    if (nextMode) {
+      const sourceKey = nextMode === "stopLoss" ? "slPrice" : "tpPrice";
+      setForm((f) => ({ ...f, exitPrice: f[sourceKey] }));
+    }
+  };
+
   const previewPnl = useMemo(() => {
     if (!form.entryPrice || !form.exitPrice || !form.contracts) return null;
     return computePnL(form);
@@ -439,7 +466,7 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
       slPrice: form.slPrice === "" ? "" : Number(form.slPrice),
       fees: form.fees === "" ? 0 : Number(form.fees),
       screenshot: form.screenshot || "",
-    });
+    }, !initial && addToAllAccounts);
   };
 
   return (
@@ -506,22 +533,29 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
 
           <label className="tj-field">
             <span>Exit price</span>
-            <input type="number" step="0.01" value={form.exitPrice} onChange={set("exitPrice")} placeholder="e.g. 19875.00" />
+            <input type="number" step="0.01" value={form.exitPrice} onChange={setExitPrice} placeholder="e.g. 19875.00" />
+            <div className="tj-exit-shortcuts">
+              <button type="button" className={`tj-shortcut-btn ${exitPriceMode === "stopLoss" ? "tj-shortcut-active" : ""}`} disabled={!form.slPrice} aria-pressed={exitPriceMode === "stopLoss"} onClick={() => toggleExitPriceMode("stopLoss")}>Same as stop loss</button>
+              <button type="button" className={`tj-shortcut-btn ${exitPriceMode === "takeProfit" ? "tj-shortcut-active" : ""}`} disabled={!form.tpPrice} aria-pressed={exitPriceMode === "takeProfit"} onClick={() => toggleExitPriceMode("takeProfit")}>Same as take profit</button>
+            </div>
           </label>
 
           <label className="tj-field">
             <span>Take-profit price</span>
-            <input type="number" step="0.01" value={form.tpPrice} onChange={set("tpPrice")} placeholder="optional" />
+            <input type="number" step="0.01" value={form.tpPrice} onChange={setPriceWithExitSync("tpPrice")} placeholder="optional" />
           </label>
 
           <label className="tj-field">
             <span>Stop-loss price</span>
-            <input type="number" step="0.01" value={form.slPrice} onChange={set("slPrice")} placeholder="optional" />
+            <input type="number" step="0.01" value={form.slPrice} onChange={setPriceWithExitSync("slPrice")} placeholder="optional" />
           </label>
 
           <label className="tj-field">
             <span>Fees</span>
             <input type="number" min="0" step="0.01" value={form.fees} onChange={set("fees")} placeholder="0.00" />
+            <button type="button" className="tj-shortcut-btn" disabled={lastTradeFees === null || lastTradeFees === undefined} onClick={() => setForm((f) => ({ ...f, fees: lastTradeFees }))}>
+              Use last fees{lastTradeFees !== null && lastTradeFees !== undefined ? ` (${fmtMoney(Number(lastTradeFees))})` : ""}
+            </button>
           </label>
 
           <label className="tj-field tj-field-wide">
@@ -623,6 +657,14 @@ function TradeForm({ initial, tagLibrary, onCreateTag, onDeleteTag, onSave, onCa
           <span>Realized P&amp;L</span>
           {previewPnl === null ? <span className="tj-neu">—</span> : <PnLText value={previewPnl} />}
         </div>
+
+        {!initial ? (
+          <label className="tj-check-row">
+            <input type="checkbox" checked={addToAllAccounts} onChange={(e) => setAddToAllAccounts(e.target.checked)} disabled={accountCount < 2} />
+            <span>Add trade to all accounts</span>
+            <small>{accountCount < 2 ? "Create another account to enable this" : "Useful for copied trades"}</small>
+          </label>
+        ) : null}
 
         {error ? <div className="tj-form-error">{error}</div> : null}
 
@@ -1489,6 +1531,7 @@ export default function TradingJournal() {
   const activeAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0];
   const rawTrades = activeAccount?.trades || [];
   const trades = useMemo(() => rawTrades.map(enrichTrade), [rawTrades]);
+  const lastTrade = useMemo(() => [...rawTrades].sort(compareTradesDesc)[0], [rawTrades]);
 
   const handleCreateAccount = () => {
     const name = window.prompt("Account name", `Account ${accounts.length + 1}`)?.trim();
@@ -1528,10 +1571,11 @@ export default function TradingJournal() {
     setFormOpen(true);
   };
 
-  const handleSave = (trade) => {
+  const handleSave = (trade, addToAllAccounts = false) => {
     setAccounts((prev) => {
       const next = prev.map((account) => {
-        if (account.id !== activeAccount?.id) return account;
+        const shouldAdd = account.id === activeAccount?.id || (!editingTrade && addToAllAccounts);
+        if (!shouldAdd) return account;
         const exists = account.trades.some((t) => t.id === trade.id);
         const nextTrades = exists ? account.trades.map((t) => (t.id === trade.id ? trade : t)) : [...account.trades, trade];
         return { ...account, trades: nextTrades };
@@ -2036,12 +2080,19 @@ export default function TradingJournal() {
         }
         .tj-toggle-active-pos { border-color: var(--gain); color: var(--gain); background: rgba(79,174,124,0.1); }
         .tj-toggle-active-neg { border-color: var(--loss); color: var(--loss); background: rgba(193,88,74,0.1); }
+        .tj-exit-shortcuts { display: flex; gap: 6px; flex-wrap: wrap; }
+        .tj-shortcut-btn { border: 1px solid var(--border); background: transparent; color: var(--text-faint); border-radius: 3px; padding: 5px 7px; cursor: pointer; font-size: 10px; }
+        .tj-shortcut-btn:hover:not(:disabled), .tj-shortcut-active { border-color: var(--accent); color: var(--accent); background: rgba(217,168,78,0.08); }
+        .tj-shortcut-btn:disabled { cursor: not-allowed; opacity: 0.45; }
         .tj-form-preview {
           display: flex; justify-content: space-between; align-items: center;
           margin-top: 18px; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border);
           font-size: 13px;
         }
         .tj-form-error { color: var(--loss); font-size: 12px; margin-top: 10px; }
+        .tj-check-row { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim); font-size: 12px; }
+        .tj-check-row input { accent-color: var(--accent); }
+        .tj-check-row small { margin-left: auto; color: var(--text-faint); font-size: 10px; }
         .tj-modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
         .tj-upload-box { display: flex; flex-direction: column; gap: 10px; }
         .tj-upload-button {
@@ -2412,6 +2463,8 @@ export default function TradingJournal() {
       {formOpen && (
         <TradeForm
           initial={editingTrade}
+          accountCount={accounts.length}
+          lastTradeFees={lastTrade?.fees ?? null}
           tagLibrary={tagLibrary}
           onCreateTag={handleCreateTag}
           onDeleteTag={handleDeleteTag}
