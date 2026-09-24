@@ -1768,6 +1768,34 @@ export default function TradingJournal() {
     URL.revokeObjectURL(url);
   };
 
+  const exportCsv = () => {
+    if (!activeAccount) return;
+    const rows = rawTrades.map((trade) => ({
+      date: getEntryDate(trade),
+      entryTime: trade.entryTime || "",
+      instrument: trade.instrument || "",
+      direction: trade.direction || "",
+      contracts: trade.contracts ?? "",
+      entry: trade.entryPrice ?? "",
+      exit: trade.exitPrice ?? "",
+      tp: trade.tpPrice ?? "",
+      sl: trade.slPrice ?? "",
+      fees: trade.fees ?? "",
+      notes: trade.notes || "",
+      tags: Array.isArray(trade.tags) ? trade.tags.join(" ") : "",
+      confidenceBefore: trade.confidenceBefore ?? "",
+      confidenceAfter: trade.confidenceAfter ?? "",
+    }));
+    const csv = Papa.unparse(rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${String(activeAccount.name || "trades").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "trades"}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const tabLabel = { dashboard: "Dashboard", trades: "Trades", calendar: "Calendar" }[tab];
 
   if (cloudConfigured && !session && !loading) {
@@ -2551,6 +2579,9 @@ export default function TradingJournal() {
           </button>
           <button className="tj-btn" onClick={downloadTemplate} style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
             <Download size={13} /> CSV template
+          </button>
+          <button className="tj-btn" onClick={exportCsv} disabled={!activeAccount || rawTrades.length === 0} style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+            <Download size={13} /> Export CSV
           </button>
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCsv} />
         </div>
