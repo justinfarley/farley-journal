@@ -43,6 +43,7 @@ import {
 
 const POINT_VALUE = { NQ: 20, MNQ: 2, ES: 50, MES: 5 };
 const INSTRUMENTS = ["NQ", "ES", "MES", "MNQ"];
+const TRADING_SESSIONS = ["Asia", "London", "New York", "Off-hours", "N/A"];
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const WEEKDAYS_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
 const MONTH_NAMES = [
@@ -140,12 +141,14 @@ function computePlannedR(trade) {
 
 function enrichTrade(trade) {
   const pnl = computePnL(trade);
+  const date = getEntryDate(trade);
   return {
     ...trade,
+    date,
     pnl,
     realizedR: computeRealizedR(trade),
     plannedR: computePlannedR(trade),
-    dow: dayOfWeek(trade.date),
+    dow: dayOfWeek(date),
   };
 }
 
@@ -174,6 +177,55 @@ function normalizeInstrument(v) {
   return INSTRUMENTS.includes(s) ? s : "NQ";
 }
 
+function getTradingSession(trade) {
+  const raw = trade.entryTime || trade.timestamp;
+  if (!raw) return "N/A";
+  let hour;
+  let minute;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(raw)) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(String(raw))) {
+    [, , , , hour, minute] = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/) || [];
+    hour = Number(hour);
+    minute = Number(minute);
+  } else {
+    const timestamp = new Date(raw);
+    if (Number.isNaN(timestamp.getTime())) return "N/A";
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Etc/GMT+5",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(timestamp);
+    hour = Number(parts.find((part) => part.type === "hour")?.value);
+    minute = Number(parts.find((part) => part.type === "minute")?.value);
+  }
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return "N/A";
+  if (hour === 24) hour = 0;
+  const totalMinutes = hour * 60 + minute;
+  if (totalMinutes >= 19 * 60 || totalMinutes < 3 * 60) return "Asia";
+  if (totalMinutes < 9 * 60 + 30) return "London";
+  if (totalMinutes < 17 * 60) return "New York";
+  return "Off-hours";
+}
+
+function getEntryDate(trade) {
+  const raw = trade.entryTime || trade.timestamp;
+  if (!raw) return trade.date || "";
+  const text = String(raw);
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) return text.slice(0, 10) || trade.date || "";
+  const timestamp = new Date(text);
+  if (Number.isNaN(timestamp.getTime())) return trade.date || "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Etc/GMT+5",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(timestamp).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+  return parts.year && parts.month && parts.day ? `${parts.year}-${parts.month}-${parts.day}` : trade.date || "";
+}
+
 const CSV_FIELD_MAP = {
   date: "date",
   tradedate: "date",
@@ -189,6 +241,11 @@ const CSV_FIELD_MAP = {
   entryprice: "entryPrice",
   exit: "exitPrice",
   exitprice: "exitPrice",
+  entrytime: "entryTime",
+  entrytimestamp: "entryTime",
+  exittime: "exitTime",
+  exittimestamp: "exitTime",
+  timestamp: "entryTime",
   tp: "tpPrice",
   tpprice: "tpPrice",
   takeprofit: "tpPrice",
@@ -235,8 +292,10 @@ function rowToTrade(row) {
     else if (key === "direction") t.direction = normalizeDirection(rawVal);
     else if (key === "contracts") t.contracts = Number(rawVal) || 1;
     else if (key === "notes") t.notes = String(rawVal || "");
+    else if (key === "entryTime" || key === "exitTime") t[key] = String(rawVal || "").trim();
     else t[key] = rawVal === "" || rawVal === undefined ? "" : Number(rawVal);
   });
+  if (!t.date && t.entryTime) t.date = t.entryTime.slice(0, 10);
   return t;
 }
 
@@ -356,17 +415,44 @@ function ConfidenceDots({ value, onChange }) {
   );
 }
 
+function toEstDateTimeInput(value) {
+  if (!value) return "";
+  const text = String(value);
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) return text.slice(0, 16);
+  const timestamp = new Date(text);
+  if (Number.isNaN(timestamp.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Etc/GMT+5",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(timestamp).reduce((result, part) => {
+    result[part.type] = part.value;
+    return result;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function getCurrentEstDateTime() {
+  return toEstDateTimeInput(new Date().toISOString());
+}
+
 function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCreateTag, onDeleteTag, onSave, onCancel, onDelete }) {
+  const defaultEntryTime = getCurrentEstDateTime();
   const [form, setForm] = useState(
     () =>
-      initial || {
+      initial ? { ...initial, entryTime: toEstDateTimeInput(initial.entryTime) } : {
         id: uid(),
-        date: new Date().toISOString().slice(0, 10),
+        date: defaultEntryTime.slice(0, 10),
         instrument: "NQ",
         direction: "Long",
         contracts: 1,
         entryPrice: "",
         exitPrice: "",
+        entryTime: defaultEntryTime,
         tpPrice: "",
         slPrice: "",
         fees: 0,
@@ -488,6 +574,11 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
           <label className="tj-field">
             <span>Day of week</span>
             <input type="text" value={form.date ? dayOfWeek(form.date) : ""} readOnly disabled />
+          </label>
+
+          <label className="tj-field">
+            <span>Entry timestamp (EST)</span>
+            <input type="datetime-local" value={form.entryTime || ""} onChange={set("entryTime")} />
           </label>
 
           <label className="tj-field">
@@ -764,6 +855,16 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
       if (t.pnl > 0) instMap[t.instrument].wins += 1;
     });
 
+    // Session and date-based metrics use the EST entry timestamp.
+    const sessionMap = {};
+    TRADING_SESSIONS.forEach((session) => (sessionMap[session] = { pnl: 0, count: 0, wins: 0 }));
+    trades.forEach((t) => {
+      const session = getTradingSession(t);
+      sessionMap[session].pnl += t.pnl;
+      sessionMap[session].count += 1;
+      if (t.pnl > 0) sessionMap[session].wins += 1;
+    });
+
     // tag performance
     const tagMap = {};
     trades.forEach((t) => {
@@ -800,6 +901,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
       streak,
       dowData,
       instMap,
+      sessionMap,
       tagRows,
       avgConfBefore,
       avgConfAfter,
@@ -984,6 +1086,28 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
             })}
             {INSTRUMENTS.every((i) => stats.instMap[i].count === 0) && <div className="tj-panel-sub">No data yet.</div>}
           </div>
+        </div>
+      </div>
+
+      <div className="tj-panel">
+        <div className="tj-panel-head">
+          <h3>By trading session</h3>
+          <span className="tj-panel-sub">Based on entry time in EST</span>
+        </div>
+        <div className="tj-inst-list">
+          {TRADING_SESSIONS.filter((session) => stats.sessionMap[session].count > 0).map((session) => {
+            const d = stats.sessionMap[session];
+            const wr = (d.wins / d.count) * 100;
+            return (
+              <div className="tj-inst-row" key={session}>
+                <span className="tj-inst-name">{session}</span>
+                <span className="tj-inst-count">{d.count} trades</span>
+                <span className="tj-inst-wr">{fmtNum(wr, 0)}% win</span>
+                <PnLText value={d.pnl} decimals={2} />
+              </div>
+            );
+          })}
+          {TRADING_SESSIONS.every((session) => stats.sessionMap[session].count === 0) && <div className="tj-panel-sub">N/A</div>}
         </div>
       </div>
 
@@ -1633,8 +1757,8 @@ export default function TradingJournal() {
 
   const downloadTemplate = () => {
     const csv =
-      "date,instrument,direction,contracts,entry,exit,tp,sl,fees,notes\n" +
-      "2026-09-08,NQ,Long,1,19850.25,19875.00,19900.00,19825.00,4.00,Example trade\n";
+      "date,entryTime,instrument,direction,contracts,entry,exit,tp,sl,fees,notes\n" +
+      "2026-09-08,2026-09-08T09:30,NQ,Long,1,19850.25,19875.00,19900.00,19825.00,4.00,Example trade\n";
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1926,13 +2050,13 @@ export default function TradingJournal() {
 
         .tj-inst-list { display: flex; flex-direction: column; }
         .tj-inst-row {
-          display: grid; grid-template-columns: 50px 1fr 70px 90px;
-          align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border);
+          display: grid; grid-template-columns: minmax(90px, 1.3fr) minmax(70px, 1fr) minmax(60px, auto) auto;
+          align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--border);
           font-size: 12.5px;
         }
         .tj-inst-row:last-child { border-bottom: none; }
-        .tj-inst-name { font-weight: 600; }
-        .tj-inst-count, .tj-inst-wr { color: var(--text-dim); }
+        .tj-inst-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tj-inst-count, .tj-inst-wr { color: var(--text-dim); white-space: nowrap; }
         .tj-tag-perf-row { grid-template-columns: 160px 1fr 70px 90px; }
 
         /* Tag picker (in form) */
@@ -2302,7 +2426,8 @@ export default function TradingJournal() {
           }
 
           .tj-inst-row {
-            grid-template-columns: 42px 1fr 60px 70px;
+            grid-template-columns: minmax(70px, 1.2fr) minmax(58px, 1fr) minmax(52px, auto) auto;
+            gap: 5px;
             font-size: 11.5px;
           }
 
