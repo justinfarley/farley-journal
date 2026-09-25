@@ -146,14 +146,9 @@ function computeRealizedR(trade) {
 function computePlannedR(trade) {
   const risk = computeRPoints(trade);
   const entry = Number(trade.entryPrice);
-  const levels = Array.isArray(trade.tpLevels) && trade.tpLevels.length
-    ? trade.tpLevels
-    : [{ price: trade.tpPrice, contracts: trade.contracts }];
-  const validLevels = levels.filter((level) => isFinite(Number(level.price)) && Number(level.contracts) > 0);
-  const totalContracts = validLevels.reduce((sum, level) => sum + Number(level.contracts), 0);
-  if (risk === null || !totalContracts) return null;
-  const weightedReward = validLevels.reduce((sum, level) => sum + Math.abs(Number(level.price) - entry) * Number(level.contracts), 0);
-  return weightedReward / totalContracts / risk;
+  const averageTp = getTakeProfitExitPrice(trade);
+  if (risk === null || averageTp === null || !isFinite(entry)) return null;
+  return Math.abs(averageTp - entry) / risk;
 }
 
 function enrichTrade(trade) {
@@ -537,22 +532,14 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
 
   const setPriceWithExitSync = (key) => (e) => {
     const value = e.target.value;
-    setForm((f) => {
-      const next = { ...f, [key]: value };
-      if ((key === "slPrice" && exitPriceMode === "stopLoss") || (key === "tpPrice" && exitPriceMode === "takeProfit")) {
-        next.exitPrice = value;
-      }
-      return next;
-    });
+    setForm((f) => ({ ...f, [key]: value }));
   };
 
   const updateTakeProfit = (index, key, value) => {
     setForm((f) => {
       const levels = (f.tpLevels || []).map((level, levelIndex) => levelIndex === index ? { ...level, [key]: value } : level);
       const firstPrice = levels[0]?.price ?? "";
-      const next = { ...f, tpLevels: levels, tpPrice: firstPrice };
-      if (exitPriceMode === "takeProfit") next.exitPrice = getTakeProfitExitPrice(next) ?? next.exitPrice;
-      return next;
+      return { ...f, tpLevels: levels, tpPrice: firstPrice };
     });
   };
 
@@ -564,19 +551,20 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
   const removeTakeProfit = (index) => {
     setForm((f) => {
       const levels = (f.tpLevels || []).filter((_, levelIndex) => levelIndex !== index);
-      const next = { ...f, tpLevels: levels, tpPrice: levels[0]?.price ?? "" };
-      if (exitPriceMode === "takeProfit") next.exitPrice = getTakeProfitExitPrice(next) ?? next.exitPrice;
-      return next;
+      return { ...f, tpLevels: levels, tpPrice: levels[0]?.price ?? "" };
     });
   };
 
   const toggleExitPriceMode = (mode) => {
     const nextMode = exitPriceMode === mode ? "" : mode;
     setExitPriceMode(nextMode);
-    if (nextMode) {
-      setForm((f) => ({ ...f, exitPrice: nextMode === "stopLoss" ? f.slPrice : getTakeProfitExitPrice(f) ?? f.tpPrice }));
-    }
   };
+
+  useEffect(() => {
+    if (!exitPriceMode) return;
+    const sourcePrice = (exitPriceMode === "stopLoss" ? form.slPrice : getTakeProfitExitPrice(form) ?? form.tpPrice) ?? "";
+    setForm((f) => String(f.exitPrice) === String(sourcePrice) ? f : { ...f, exitPrice: sourcePrice });
+  }, [exitPriceMode, form.slPrice, form.tpLevels, form.tpPrice, form.contracts]);
 
   const previewPnl = useMemo(() => {
     if (!form.entryPrice || !form.exitPrice || !form.contracts) return null;
@@ -878,7 +866,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
     const worst = trades.reduce((m, t) => (t.pnl < m.pnl ? t : m), trades[0]);
     const rValues = trades.map((t) => t.realizedR).filter((r) => r !== null && isFinite(r));
     const avgR = rValues.length ? rValues.reduce((s, r) => s + r, 0) / rValues.length : null;
-    const plannedRValues = trades.map((t) => t.plannedR).filter((r) => r !== null && isFinite(r));
+    const plannedRValues = trades.map((t) => t.plannedR).filter((r) => r !== null && isFinite(r) && r > 0);
     const avgPlannedR = plannedRValues.length
       ? plannedRValues.reduce((s, r) => s + r, 0) / plannedRValues.length
       : null;
