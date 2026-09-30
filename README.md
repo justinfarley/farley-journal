@@ -60,20 +60,38 @@ Install and sign in to the Supabase CLI, then deploy the function (replace `PROJ
 ```sh
 supabase login
 supabase link --project-ref PROJECT_REF
-supabase functions deploy send-alerts
 supabase secrets set VAPID_PUBLIC_KEY=YOUR_PUBLIC_KEY VAPID_PRIVATE_KEY=YOUR_PRIVATE_KEY VAPID_CONTACT=mailto:YOUR_EMAIL
 ```
 
-Supabase supplies `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to the function. Keep the service-role key private.
+Generate a separate random caller secret in PowerShell, then set it for the function:
+
+```powershell
+$bytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$pushCronSecret = [Convert]::ToBase64String($bytes)
+$rng.Dispose()
+supabase secrets set "PUSH_CRON_SECRET=$pushCronSecret"
+```
+
+Supabase supplies `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to the function for database access. The function uses `PUSH_CRON_SECRET` to authenticate scheduled calls; keep both secrets private. Deploy after setting the secrets:
+
+```sh
+supabase functions deploy send-alerts
+```
 
 ### 4. Schedule the sender
 
-In Supabase, enable the `pg_cron`, `pg_net`, and Vault extensions. In **Database > Vault**, create two secrets:
+In Supabase, enable the `pg_cron`, `pg_net`, and Vault extensions. Create a Vault secret named `project_url` with your project URL, such as `https://PROJECT_REF.supabase.co`.
 
-- `project_url`: your Supabase project URL, such as `https://PROJECT_REF.supabase.co`
-- `service_role_key`: the project's service-role key
+Create another Vault secret named `push_cron_secret` with the exact value of `$pushCronSecret`. You can create these in the Vault UI if available, or use SQL Editor. For SQL Editor, replace the placeholder, run this without saving the query, and do not share its contents:
 
-Run `supabase/push_cron.sql` in the SQL Editor. It invokes the sender every minute using those Vault secrets.
+```sql
+select vault.create_secret('https://YOUR_PROJECT_REF.supabase.co', 'project_url');
+select vault.create_secret('YOUR_PUSH_CRON_SECRET', 'push_cron_secret');
+```
+
+Run `supabase/push_cron.sql` in the SQL Editor. It invokes the sender every minute using those Vault secrets. This dedicated secret avoids using the service-role key as the function's caller credential.
 
 ### 5. Build and enable on iPhone
 

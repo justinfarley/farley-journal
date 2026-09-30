@@ -2,6 +2,7 @@ import webpush from "npm:web-push@3.6.7";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")?.replace(/\/$/, "");
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const pushCronSecret = Deno.env.get("PUSH_CRON_SECRET");
 const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY");
 const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY");
 const vapidContact = Deno.env.get("VAPID_CONTACT");
@@ -111,11 +112,11 @@ async function removeSubscription(endpoint: string) {
 }
 
 Deno.serve(async (request) => {
-  if (!supabaseUrl || !serviceRoleKey || !vapidPublicKey || !vapidPrivateKey || !vapidContact) {
+  if (!supabaseUrl || !serviceRoleKey || !pushCronSecret || !vapidPublicKey || !vapidPrivateKey || !vapidContact) {
     return jsonResponse({ error: "Push sender environment is incomplete." }, 500);
   }
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405);
-  if (request.headers.get("authorization") !== `Bearer ${serviceRoleKey}`) {
+  if (request.headers.get("authorization") !== `Bearer ${pushCronSecret}`) {
     return jsonResponse({ error: "Unauthorized." }, 401);
   }
 
