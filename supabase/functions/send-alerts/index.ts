@@ -139,8 +139,8 @@ Deno.serve(async (request) => {
       for (const row of subscriptions) {
         try {
           await webpush.sendNotification(row.subscription, JSON.stringify({
-            title: alert.title,
-            body: "Scheduled reminder",
+            title: "Scheduled reminder",
+            body: alert.title,
             tag: `farley-${alert.id}`,
           }), { TTL: 3600, urgency: "high" });
           delivered = true;
