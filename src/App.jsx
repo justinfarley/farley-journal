@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Papa from "papaparse";
-import { cloudConfigured, getCurrentSession, loadCloudData, saveCloudData, signIn, signOut, signUp } from "./cloud.js";
+import { cloudConfigured, deleteScheduledAlert, getCurrentSession, loadCloudData, loadScheduledAlerts, saveCloudData, savePushSubscription, saveScheduledAlert, signIn, signOut, signUp, WEB_PUSH_PUBLIC_KEY } from "./cloud.js";
 import {
   ResponsiveContainer,
   LineChart,
@@ -32,6 +32,7 @@ import {
   ArrowDownRight,
   Minus,
   Flame,
+  Bell,
   Target,
   Percent,
   Download,
@@ -318,6 +319,7 @@ function rowToTrade(row) {
 const STORAGE_KEY = "tape:trades";
 const ACCOUNTS_STORAGE_KEY = "tape:accounts";
 const TAGS_STORAGE_KEY = "tape:tags";
+const ALERTS_STORAGE_KEY = "farley:alerts";
 
 function loadLocalTrades() {
   try {
@@ -372,12 +374,168 @@ function persistLocalTags(tags) {
   try { window.localStorage.setItem(TAGS_STORAGE_KEY, JSON.stringify(tags)); } catch {}
 }
 
+function getLocalDateInputValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function loadLocalAlerts() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(ALERTS_STORAGE_KEY) || "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function scheduledRecordToAlert(record) {
+  const startsAt = new Date(record.starts_at);
+  return {
+    id: record.id,
+    title: record.title,
+    date: `${startsAt.getFullYear()}-${String(startsAt.getMonth() + 1).padStart(2, "0")}-${String(startsAt.getDate()).padStart(2, "0")}`,
+    time: `${String(startsAt.getHours()).padStart(2, "0")}:${String(startsAt.getMinutes()).padStart(2, "0")}`,
+    repeat: record.repeat_type,
+    starts_at: record.starts_at,
+    time_zone: record.time_zone,
+    next_fire_at: record.next_fire_at,
+  };
+}
+
+function alertToScheduledRecord(alert) {
+  const startsAt = alert.starts_at || new Date(`${alert.date}T${alert.time}:00`).toISOString();
+  return {
+    id: alert.id,
+    title: alert.title,
+    starts_at: startsAt,
+    time_zone: alert.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    repeat_type: alert.repeat_type || alert.repeat || "once",
+    next_fire_at: alert.next_fire_at || startsAt,
+  };
+}
+
+function decodeVapidKey(value) {
+  const padded = `${value}${"=".repeat((4 - value.length % 4) % 4)}`;
+  const raw = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
 function mergeById(primary, secondary) {
   const map = new Map();
   [...secondary, ...primary].forEach((item) => {
     if (item?.id && !map.has(item.id)) map.set(item.id, item);
   });
   return [...map.values()];
+}
+
+function AlertsTab({ alerts, onSave, onDelete, pushEnabled, pushLoading, pushMessage, onEnablePush }) {
+  const [title, setTitle] = useState("");
+  const [date, setDate] = useState(getLocalDateInputValue);
+  const [time, setTime] = useState("09:00");
+  const [repeat, setRepeat] = useState("once");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const cleanTitle = title.trim();
+    if (!cleanTitle || !date || !time) return;
+    const startsAt = new Date(`${date}T${time}:00`);
+    if (startsAt.getTime() <= Date.now()) {
+      setError("Choose a time in the future.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onSave({ id: uid(), title: cleanTitle, date, time, repeat });
+      setTitle("");
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const formatAlert = (alert) => {
+    const dateLabel = new Date(`${alert.date}T12:00:00`).toLocaleDateString(undefined, {
+      weekday: "short", month: "short", day: "numeric", year: "numeric",
+    });
+    const timeLabel = new Date(`2000-01-01T${alert.time}`).toLocaleTimeString(undefined, {
+      hour: "numeric", minute: "2-digit",
+    });
+    const repeatLabel = { once: "Once", daily: "Daily", weekdays: "Weekdays", weekly: "Weekly" }[alert.repeat];
+    return `${dateLabel} at ${timeLabel} · ${repeatLabel}`;
+  };
+
+  return (
+    <div>
+      <section className="tj-panel tj-alert-setup">
+        <div className="tj-panel-head">
+          <h3>Create an alert</h3>
+          <Bell size={16} />
+        </div>
+        <div className="tj-push-controls">
+          {pushEnabled ? <span className="tj-push-enabled"><Bell size={14} /> Push notifications enabled</span> : (
+            <button className="tj-btn tj-btn-primary" onClick={onEnablePush} disabled={pushLoading || !WEB_PUSH_PUBLIC_KEY}>
+              <Bell size={14} /> {pushLoading ? "Enabling…" : "Enable push notifications"}
+            </button>
+          )}
+          {!WEB_PUSH_PUBLIC_KEY ? <span className="tj-push-status">Push setup is not complete. Add the VAPID public key to the app configuration.</span> : null}
+          {pushMessage ? <span className="tj-push-status">{pushMessage}</span> : null}
+        </div>
+        <form className="tj-alert-form" onSubmit={handleSubmit}>
+          <label className="tj-field tj-alert-title">
+            Alert
+            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Review my trading plan" maxLength={100} required />
+          </label>
+          <label className="tj-field">
+            Date
+            <input type="date" min={getLocalDateInputValue()} value={date} onChange={(event) => setDate(event.target.value)} required />
+          </label>
+          <label className="tj-field">
+            Time
+            <input type="time" value={time} onChange={(event) => setTime(event.target.value)} required />
+          </label>
+          <label className="tj-field">
+            Repeat
+            <select value={repeat} onChange={(event) => setRepeat(event.target.value)}>
+              <option value="once">Does not repeat</option>
+              <option value="daily">Every day</option>
+              <option value="weekdays">Weekdays</option>
+              <option value="weekly">Every week</option>
+            </select>
+          </label>
+          <button className="tj-btn tj-btn-primary tj-alert-create" type="submit" disabled={!pushEnabled || saving}>
+            <Plus size={14} /> {saving ? "Saving…" : "Save alert"}
+          </button>
+        </form>
+        {error ? <div className="tj-alert-error" role="alert">{error}</div> : null}
+      </section>
+
+      <div className="tj-alert-note">
+        On iPhone, allow notifications when prompted. Push alerts are scheduled by Supabase and can arrive while Farley Trades is closed.
+      </div>
+
+      <section className="tj-alert-list" aria-label="Saved alerts">
+        {alerts.length === 0 ? (
+          <div className="tj-empty"><h2>No alerts yet</h2><p>Create an alert for a trading routine, review, or reminder.</p></div>
+        ) : alerts.map((alert) => (
+          <div className="tj-alert-row" key={alert.id}>
+            <div className="tj-alert-details">
+              <strong>{alert.title}</strong>
+              <span>{formatAlert(alert)}</span>
+            </div>
+            <div className="tj-alert-actions">
+              <button className="tj-icon-btn" onClick={() => onDelete(alert)} aria-label={`Delete ${alert.title}`} title="Delete alert">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1583,10 +1741,19 @@ export default function TradingJournal() {
   const [authMessage, setAuthMessage] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [tab, setTab] = useState("dashboard");
+  const [alerts, setAlerts] = useState(loadLocalAlerts);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushMessage, setPushMessage] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
   const [importMsg, setImportMsg] = useState("");
   const fileInputRef = useRef(null);
+  const pushRegistrationRef = useRef(null);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(alerts)); } catch {}
+  }, [alerts]);
 
   const sync = useCallback(async (nextAccounts, nextTags) => {
     persistLocalAccounts(nextAccounts);
@@ -1600,6 +1767,99 @@ export default function TradingJournal() {
     } finally {
       setSyncing(false);
     }
+  }, [session]);
+
+  const hydrateScheduledAlerts = useCallback(async () => {
+    const localAlerts = loadLocalAlerts();
+    try {
+      const remoteAlerts = await loadScheduledAlerts();
+      const remoteIds = new Set(remoteAlerts.map((alert) => alert.id));
+      for (const alert of localAlerts) {
+        if (remoteIds.has(alert.id)) continue;
+        const record = alertToScheduledRecord(alert);
+        if (record.repeat_type === "once" && new Date(record.starts_at).getTime() <= Date.now()) continue;
+        await saveScheduledAlert(record);
+      }
+      const latestAlerts = await loadScheduledAlerts();
+      setAlerts(latestAlerts.map(scheduledRecordToAlert));
+    } catch (error) {
+      setPushMessage(`Could not sync alerts: ${error.message}`);
+    }
+  }, []);
+
+  const handleEnablePush = async () => {
+    if (!session || !cloudConfigured) {
+      setPushMessage("Sign in with cloud sync enabled to receive background alerts.");
+      return;
+    }
+    if (!WEB_PUSH_PUBLIC_KEY) {
+      setPushMessage("Push setup is incomplete. Configure the VAPID public key first.");
+      return;
+    }
+    if (!window.isSecureContext || !("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      setPushMessage("This browser does not support Web Push. Use the installed iPhone app on iOS 16.4 or later.");
+      return;
+    }
+    const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+    if (isIos && !isStandalone) {
+      setPushMessage("On iPhone, open Farley Trades from its Home Screen icon before enabling notifications.");
+      return;
+    }
+
+    setPushLoading(true);
+    setPushMessage("");
+    try {
+      const permission = Notification.permission === "granted"
+        ? "granted"
+        : await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Notification permission was not granted.");
+
+      const baseUrl = import.meta.env.BASE_URL;
+      const registration = pushRegistrationRef.current || await navigator.serviceWorker.register(`${baseUrl}service-worker.js`, { scope: baseUrl });
+      pushRegistrationRef.current = registration;
+      const subscription = await registration.pushManager.getSubscription() || await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: decodeVapidKey(WEB_PUSH_PUBLIC_KEY),
+      });
+      await savePushSubscription(subscription.toJSON());
+      setPushEnabled(true);
+      setPushMessage("This device is registered for background alerts.");
+      await hydrateScheduledAlerts();
+    } catch (error) {
+      setPushMessage(error.message || "Could not enable push notifications.");
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const handleSaveAlert = async (alert) => {
+    if (!pushEnabled) throw new Error("Enable push notifications on this device first.");
+    const record = alertToScheduledRecord(alert);
+    await saveScheduledAlert(record);
+    setAlerts((previous) => mergeById([alert], previous));
+  };
+
+  const handleDeleteAlert = async (alert) => {
+    await deleteScheduledAlert(alert.id);
+    setAlerts((previous) => previous.filter((item) => item.id !== alert.id));
+  };
+
+  useEffect(() => {
+    if (!session || !cloudConfigured || !WEB_PUSH_PUBLIC_KEY || !("serviceWorker" in navigator)) return;
+    let active = true;
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}service-worker.js`, { scope: import.meta.env.BASE_URL })
+      .then(async (registration) => {
+        pushRegistrationRef.current = registration;
+        const subscription = await registration.pushManager.getSubscription();
+        if (!active || !subscription || !("Notification" in window) || Notification.permission !== "granted") return;
+        await savePushSubscription(subscription.toJSON());
+        if (active) setPushEnabled(true);
+      })
+      .catch((error) => {
+        if (active) setPushMessage(`Could not register this device: ${error.message}`);
+      });
+    return () => { active = false; };
   }, [session]);
 
   useEffect(() => {
@@ -1632,6 +1892,7 @@ export default function TradingJournal() {
           setSelectedAccountId(cloudAccounts[0].id);
           setTagLibrary(sourceTags);
           await saveCloudData(cloudAccounts, sourceTags);
+          if (WEB_PUSH_PUBLIC_KEY) await hydrateScheduledAlerts();
           persistLocalAccounts(cloudAccounts);
           persistLocalTags(sourceTags);
         } else {
@@ -1647,7 +1908,7 @@ export default function TradingJournal() {
       }
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [hydrateScheduledAlerts]);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -1676,6 +1937,7 @@ export default function TradingJournal() {
       setSelectedAccountId(cloudAccounts[0].id);
       setTagLibrary(sourceTags);
       await saveCloudData(cloudAccounts, sourceTags);
+      await hydrateScheduledAlerts();
       persistLocalAccounts(cloudAccounts);
       persistLocalTags(sourceTags);
     } catch (e2) {
@@ -1853,7 +2115,7 @@ export default function TradingJournal() {
     URL.revokeObjectURL(url);
   };
 
-  const tabLabel = { dashboard: "Dashboard", trades: "Trades", calendar: "Calendar" }[tab];
+  const tabLabel = { dashboard: "Dashboard", trades: "Trades", calendar: "Calendar", alerts: "Alerts" }[tab];
 
   if (cloudConfigured && !session && !loading) {
     return (
@@ -2062,6 +2324,21 @@ export default function TradingJournal() {
           color: var(--text);
         }
         .tj-sidebar-actions { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+
+        .tj-push-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
+        .tj-push-enabled { display: inline-flex; align-items: center; gap: 7px; color: var(--gain); font-size: 12px; }
+        .tj-push-status { color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+        .tj-alert-form { display: grid; grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(120px, 1fr)) auto; gap: 12px; align-items: end; }
+        .tj-alert-form .tj-field input, .tj-alert-form .tj-field select { width: 100%; min-width: 0; padding: 9px 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text); }
+        .tj-alert-create { min-height: 36px; white-space: nowrap; }
+        .tj-alert-error { color: var(--loss); font-size: 11px; margin-top: 12px; }
+        .tj-alert-note { border-left: 2px solid var(--accent); color: var(--text-dim); background: var(--surface); padding: 12px 14px; margin: 0 0 20px; font-size: 12px; line-height: 1.6; }
+        .tj-alert-list { display: flex; flex-direction: column; }
+        .tj-alert-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border); }
+        .tj-alert-details { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+        .tj-alert-details strong { font-size: 13px; overflow-wrap: anywhere; }
+        .tj-alert-details span { color: var(--text-dim); font-size: 11px; }
+        .tj-alert-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
         /* Main */
         .tj-main { flex: 1; min-width: 0; padding: 28px 36px 60px; }
@@ -2412,6 +2689,12 @@ export default function TradingJournal() {
             padding: 10px 12px;
           }
 
+          .tj-alert-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .tj-alert-title { grid-column: 1 / -1; }
+          .tj-alert-create { justify-content: center; }
+          .tj-alert-row { align-items: flex-start; flex-direction: column; }
+          .tj-alert-actions { width: 100%; }
+
           .tj-sidebar-actions {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2633,6 +2916,9 @@ export default function TradingJournal() {
           <button className={`tj-nav-item ${tab === "calendar" ? "tj-nav-active" : ""}`} onClick={() => setTab("calendar")}>
             <CalendarDays size={15} /> Calendar
           </button>
+          <button className={`tj-nav-item ${tab === "alerts" ? "tj-nav-active" : ""}`} onClick={() => setTab("alerts")}>
+            <Bell size={15} /> Alerts
+          </button>
         </nav>
         <div className="tj-sidebar-actions">
           <button className="tj-btn tj-btn-primary" onClick={handleAddNew} disabled={!activeAccount}>
@@ -2676,6 +2962,17 @@ export default function TradingJournal() {
             )}
             {tab === "trades" && <TradesTab trades={trades} tagLibrary={tagLibrary} onEdit={handleEdit} />}
             {tab === "calendar" && <CalendarTab trades={trades} />}
+            {tab === "alerts" && (
+              <AlertsTab
+                alerts={alerts}
+                onSave={handleSaveAlert}
+                onDelete={handleDeleteAlert}
+                pushEnabled={pushEnabled}
+                pushLoading={pushLoading}
+                pushMessage={pushMessage}
+                onEnablePush={handleEnablePush}
+              />
+            )}
           </>
         )}
       </main>

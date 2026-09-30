@@ -1,0 +1,4 @@
+project_id = "farley-journal"
+
+[functions.send-alerts]
+verify_jwt = true

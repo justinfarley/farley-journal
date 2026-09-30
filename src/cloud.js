@@ -1,5 +1,6 @@
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+export const WEB_PUSH_PUBLIC_KEY = import.meta.env.VITE_WEB_PUSH_PUBLIC_KEY || "";
 const SESSION_KEY = "farley:session";
 
 export const cloudConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -140,6 +141,40 @@ export async function saveCloudData(accounts, tags) {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
     body: JSON.stringify({ user_id: userId, accounts, trades: accounts[0]?.trades || [], tags }),
+  });
+}
+
+export async function loadScheduledAlerts() {
+  const rows = await request("/rest/v1/scheduled_alerts?select=id,title,starts_at,time_zone,repeat_type,next_fire_at&order=next_fire_at.asc.nullslast");
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function saveScheduledAlert(alert) {
+  const session = await refreshSessionIfNeeded();
+  const userId = session?.user?.id || session?.user_id;
+  if (!userId) throw new Error("Sign in to save push alerts.");
+  return request("/rest/v1/scheduled_alerts?on_conflict=user_id,id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({ ...alert, user_id: userId }),
+  });
+}
+
+export async function deleteScheduledAlert(id) {
+  return request(`/rest/v1/scheduled_alerts?id=eq.${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Prefer: "return=minimal" },
+  });
+}
+
+export async function savePushSubscription(subscription) {
+  const session = await refreshSessionIfNeeded();
+  const userId = session?.user?.id || session?.user_id;
+  if (!userId) throw new Error("Sign in to enable push notifications.");
+  return request("/rest/v1/push_subscriptions?on_conflict=endpoint", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ user_id: userId, endpoint: subscription.endpoint, subscription }),
   });
 }
 
