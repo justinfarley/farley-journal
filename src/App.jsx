@@ -683,6 +683,23 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
     setForm((f) => ({ ...f, [k]: v }));
   };
 
+  const setTradeDate = (event) => {
+    const date = event.target.value;
+    setForm((current) => {
+      const time = current.entryTime?.slice(11, 16) || "00:00";
+      return { ...current, date, entryTime: date ? `${date}T${time}` : current.entryTime };
+    });
+  };
+
+  const setEntryTime = (event) => {
+    const entryTime = event.target.value;
+    setForm((current) => ({
+      ...current,
+      entryTime,
+      date: entryTime ? entryTime.slice(0, 10) : current.date,
+    }));
+  };
+
   const setExitPrice = (e) => {
     setExitPriceMode("");
     set("exitPrice")(e);
@@ -767,7 +784,7 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
         <div className="tj-form-grid">
           <label className="tj-field">
             <span>Date</span>
-            <input type="date" value={form.date} onChange={set("date")} />
+            <input type="date" value={form.date} onChange={setTradeDate} />
           </label>
 
           <label className="tj-field">
@@ -777,7 +794,7 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
 
           <label className="tj-field">
             <span>Entry timestamp (EST)</span>
-            <input type="datetime-local" value={form.entryTime || ""} onChange={set("entryTime")} />
+            <input type="datetime-local" value={form.entryTime || ""} onChange={setEntryTime} />
           </label>
 
           <label className="tj-field">
