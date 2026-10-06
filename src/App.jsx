@@ -546,30 +546,25 @@ function AlertsTab({ alerts, onSave, onDelete, pushEnabled, pushLoading, pushMes
   );
 }
 
-function ScorecardEntry({ scorecards, onSave }) {
-  const [date, setDate] = useState(getLocalDateInputValue);
-  const [takeTrade, setTakeTrade] = useState("yes");
+function ScorecardEntry({ scorecards, trades, onSave }) {
   const [scores, setScores] = useState(() => Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }) => [key, ""])));
-  const [pnl, setPnl] = useState("");
   const total = SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + (Number(scores[key]) || 0), 0);
   const today = getLocalDateInputValue();
-  const dateAlreadyScored = scorecards.some((card) => card.date === date);
+  const todaysTrades = trades.filter((trade) => trade.date === today);
+  const dailyPnl = todaysTrades.reduce((sum, trade) => sum + Number(trade.pnl || 0), 0);
+  const dateAlreadyScored = scorecards.some((card) => card.date === today);
 
   const handleSubmit = (event) => {
     event.preventDefault();
     if (dateAlreadyScored) return;
     onSave({
       id: uid(),
-      date,
-      takeTrade: takeTrade === "yes",
+      date: today,
       ...Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }) => [key, Number(scores[key])])),
       total,
-      pnl: Number(pnl),
+      pnl: dailyPnl,
     });
-    setDate(getLocalDateInputValue());
-    setTakeTrade("yes");
     setScores(Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }) => [key, ""])));
-    setPnl("");
   };
 
   if (scorecards.some((card) => card.date === today)) {
@@ -586,23 +581,11 @@ function ScorecardEntry({ scorecards, onSave }) {
       <div className="tj-panel-head">
         <div>
           <h3>Trading score sheet</h3>
-          <span className="tj-panel-sub">Rate the process, not just the result</span>
+          <span className="tj-panel-sub">Today's total from {todaysTrades.length} trade{todaysTrades.length === 1 ? "" : "s"}</span>
         </div>
         <ClipboardCheck size={16} />
       </div>
       <form className="tj-scorecard-form" onSubmit={handleSubmit}>
-        {dateAlreadyScored ? <div className="tj-scorecard-duplicate" role="status">A scorecard already exists for this date. Delete it from Scorecards to enter another.</div> : null}
-        <label className="tj-field">
-          Date
-          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
-        </label>
-        <label className="tj-field">
-          Take trade
-          <select value={takeTrade} onChange={(event) => setTakeTrade(event.target.value)}>
-            <option value="yes">Yes</option>
-            <option value="no">No</option>
-          </select>
-        </label>
         {SCORECARD_CATEGORIES.map(({ key, label }) => (
           <label className="tj-field" key={key}>
             {label} <span className="tj-scorecard-scale">0-10</span>
@@ -619,7 +602,7 @@ function ScorecardEntry({ scorecards, onSave }) {
         ))}
         <label className="tj-field">
           P&amp;L
-          <input type="number" step="0.01" value={pnl} onChange={(event) => setPnl(event.target.value)} required />
+          <input type="number" step="0.01" value={dailyPnl.toFixed(2)} readOnly aria-label={`Today's P&L from ${todaysTrades.length} trades`} />
         </label>
         <div className="tj-scorecard-total">
           <span>Score total</span>
@@ -660,7 +643,6 @@ function ScorecardsTab({ scorecards, onDelete }) {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Trade</th>
                   {SCORECARD_CATEGORIES.map(({ key, label }) => <th key={key}>{label}</th>)}
                   <th>Total</th>
                   <th>P&amp;L</th>
@@ -671,7 +653,6 @@ function ScorecardsTab({ scorecards, onDelete }) {
                 {sortedScorecards.map((card) => (
                   <tr key={card.id}>
                     <td>{new Date(`${card.date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</td>
-                    <td>{card.takeTrade ? "Yes" : "No"}</td>
                     {SCORECARD_CATEGORIES.map(({ key }) => <td key={key}>{Number(card[key] || 0)}</td>)}
                     <td><strong>{Number(card.total ?? SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + Number(card[key] || 0), 0))} / 40</strong></td>
                     <td><PnLText value={Number(card.pnl || 0)} /></td>
@@ -1334,7 +1315,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
   if (!stats) return (
     <div>
       <WeeklyGoalPanel weeklyProfit={weeklyProfit} weeklyGoal={weeklyGoal} onWeeklyGoalChange={onWeeklyGoalChange} />
-      <ScorecardEntry scorecards={scorecards} onSave={onSaveScorecard} />
+      <ScorecardEntry scorecards={scorecards} trades={trades} onSave={onSaveScorecard} />
       <div className="tj-empty"><h2>No trades logged yet</h2><p>Add your first trade or import a CSV to see your performance take shape here.</p></div>
     </div>
   );
@@ -1344,7 +1325,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
   return (
     <div>
       <WeeklyGoalPanel weeklyProfit={weeklyProfit} weeklyGoal={weeklyGoal} onWeeklyGoalChange={onWeeklyGoalChange} />
-      <ScorecardEntry scorecards={scorecards} onSave={onSaveScorecard} />
+      <ScorecardEntry scorecards={scorecards} trades={trades} onSave={onSaveScorecard} />
 
       <div className="tj-stat-row">
         <StatBlock label="Total P&L" value={<PnLText value={stats.totalPnL} decimals={2} />} sub={`${stats.count} trades`} />
@@ -2540,7 +2521,7 @@ export default function TradingJournal() {
         .tj-scorecard-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: end; }
         .tj-scorecard-form .tj-field input, .tj-scorecard-form .tj-field select { width: 100%; min-width: 0; }
         .tj-scorecard-scale { color: var(--text-faint); font-size: 10px; }
-        .tj-scorecard-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; color: var(--text-dim); font-size: 12px; }
+        .tj-scorecard-total { display: flex; align-items: center; justify-content: flex-start; gap: 8px; min-height: 36px; color: var(--text-dim); font-size: 12px; }
         .tj-scorecard-total strong { color: var(--text); font-family: var(--font-mono); font-size: 15px; }
         .tj-scorecard-total small { color: var(--text-faint); font-size: 11px; font-weight: 400; }
         .tj-scorecard-save { justify-content: center; min-height: 36px; white-space: nowrap; }
