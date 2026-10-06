@@ -28,6 +28,7 @@ import {
   LayoutGrid,
   ListTree,
   CalendarDays,
+  ClipboardCheck,
   ArrowUpRight,
   ArrowDownRight,
   Minus,
@@ -48,6 +49,12 @@ const INSTRUMENTS = ["NQ", "ES", "MES", "MNQ"];
 const TRADING_SESSIONS = ["Asia", "London", "New York", "Off-hours", "N/A"];
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const WEEKDAYS_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
+const SCORECARD_CATEGORIES = [
+  { key: "setupRules", label: "Followed setup rules" },
+  { key: "positionSizing", label: "Position sizing" },
+  { key: "patience", label: "Patience" },
+  { key: "stoppedAsPlanned", label: "Stopped when supposed to" },
+];
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -367,6 +374,7 @@ function normalizeAccounts(accounts) {
     name: String(account.name || `Account ${index + 1}`),
     trades: Array.isArray(account.trades) ? account.trades : [],
     weeklyGoal: Number(account.weeklyGoal) > 0 ? Number(account.weeklyGoal) : "",
+    scorecards: Array.isArray(account.scorecards) ? account.scorecards : [],
   }));
 }
 
@@ -533,6 +541,151 @@ function AlertsTab({ alerts, onSave, onDelete, pushEnabled, pushLoading, pushMes
             </div>
           </div>
         ))}
+      </section>
+    </div>
+  );
+}
+
+function ScorecardEntry({ scorecards, onSave }) {
+  const [date, setDate] = useState(getLocalDateInputValue);
+  const [takeTrade, setTakeTrade] = useState("yes");
+  const [scores, setScores] = useState(() => Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }) => [key, ""])));
+  const [pnl, setPnl] = useState("");
+  const total = SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + (Number(scores[key]) || 0), 0);
+  const today = getLocalDateInputValue();
+  const dateAlreadyScored = scorecards.some((card) => card.date === date);
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (dateAlreadyScored) return;
+    onSave({
+      id: uid(),
+      date,
+      takeTrade: takeTrade === "yes",
+      ...Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }) => [key, Number(scores[key])])),
+      total,
+      pnl: Number(pnl),
+    });
+    setDate(getLocalDateInputValue());
+    setTakeTrade("yes");
+    setScores(Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }) => [key, ""])));
+    setPnl("");
+  };
+
+  if (scorecards.some((card) => card.date === today)) {
+    return (
+      <div className="tj-scorecard-complete" role="status">
+        <ClipboardCheck size={17} />
+        <span>Today's scorecard is complete.</span>
+      </div>
+    );
+  }
+
+  return (
+    <section className="tj-panel tj-scorecard-entry">
+      <div className="tj-panel-head">
+        <div>
+          <h3>Trading score sheet</h3>
+          <span className="tj-panel-sub">Rate the process, not just the result</span>
+        </div>
+        <ClipboardCheck size={16} />
+      </div>
+      <form className="tj-scorecard-form" onSubmit={handleSubmit}>
+        {dateAlreadyScored ? <div className="tj-scorecard-duplicate" role="status">A scorecard already exists for this date. Delete it from Scorecards to enter another.</div> : null}
+        <label className="tj-field">
+          Date
+          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required />
+        </label>
+        <label className="tj-field">
+          Take trade
+          <select value={takeTrade} onChange={(event) => setTakeTrade(event.target.value)}>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </label>
+        {SCORECARD_CATEGORIES.map(({ key, label }) => (
+          <label className="tj-field" key={key}>
+            {label} <span className="tj-scorecard-scale">0-10</span>
+            <input
+              type="number"
+              min="0"
+              max="10"
+              step="1"
+              value={scores[key]}
+              onChange={(event) => setScores((previous) => ({ ...previous, [key]: event.target.value }))}
+              required
+            />
+          </label>
+        ))}
+        <label className="tj-field">
+          P&amp;L
+          <input type="number" step="0.01" value={pnl} onChange={(event) => setPnl(event.target.value)} required />
+        </label>
+        <div className="tj-scorecard-total">
+          <span>Score total</span>
+          <strong>{total}<small> / 40</small></strong>
+        </div>
+        <button className="tj-btn tj-btn-primary tj-scorecard-save" type="submit" disabled={dateAlreadyScored}>
+          <Plus size={14} /> Save scorecard
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function ScorecardsTab({ scorecards, onDelete }) {
+  const averages = useMemo(() => {
+    if (!scorecards.length) return null;
+    const average = (key) => scorecards.reduce((sum, card) => sum + Number(card[key] || 0), 0) / scorecards.length;
+    const averageTotal = scorecards.reduce((sum, card) => sum + Number(card.total ?? SCORECARD_CATEGORIES.reduce((categorySum, { key }) => categorySum + Number(card[key] || 0), 0)), 0) / scorecards.length;
+    return { average, averageTotal };
+  }, [scorecards]);
+  const sortedScorecards = useMemo(() => [...scorecards].sort((a, b) => b.date.localeCompare(a.date)), [scorecards]);
+
+  return (
+    <div>
+      <section className="tj-scorecard-averages" aria-label="Scorecard averages">
+        <StatBlock label="Overall average" value={averages ? `${fmtNum(averages.averageTotal, 1)} / 40` : "--"} sub={averages ? `${fmtNum(averages.averageTotal / 4, 1)} / 10 normalized` : "No scorecards"} />
+        {SCORECARD_CATEGORIES.map(({ key, label }) => (
+          <StatBlock key={key} label={label} value={averages ? `${fmtNum(averages.average(key), 1)} / 10` : "--"} />
+        ))}
+      </section>
+
+      <section className="tj-scorecard-history" aria-label="Saved scorecards">
+        {sortedScorecards.length === 0 ? (
+          <div className="tj-empty"><h2>No scorecards yet</h2><p>Save a score sheet from the dashboard to start tracking your process.</p></div>
+        ) : (
+          <div className="tj-scorecard-table-wrap">
+            <table className="tj-scorecard-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Trade</th>
+                  {SCORECARD_CATEGORIES.map(({ key, label }) => <th key={key}>{label}</th>)}
+                  <th>Total</th>
+                  <th>P&amp;L</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {sortedScorecards.map((card) => (
+                  <tr key={card.id}>
+                    <td>{new Date(`${card.date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</td>
+                    <td>{card.takeTrade ? "Yes" : "No"}</td>
+                    {SCORECARD_CATEGORIES.map(({ key }) => <td key={key}>{Number(card[key] || 0)}</td>)}
+                    <td><strong>{Number(card.total ?? SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + Number(card[key] || 0), 0))} / 40</strong></td>
+                    <td><PnLText value={Number(card.pnl || 0)} /></td>
+                    <td>
+                      <button className="tj-icon-btn" onClick={() => onDelete(card.id)} aria-label={`Delete scorecard from ${card.date}`} title="Delete scorecard">
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -1017,12 +1170,49 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
 // Dashboard
 // ---------------------------------------------------------------------------
 
-function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
-  const weekStart = getWeekStartDate();
-  const weeklyProfit = trades.filter((trade) => trade.date >= weekStart).reduce((sum, trade) => sum + trade.pnl, 0);
+function WeeklyGoalPanel({ weeklyProfit, weeklyGoal, onWeeklyGoalChange }) {
   const goalValue = Number(weeklyGoal) || 0;
   const goalProgress = goalValue > 0 ? (weeklyProfit / goalValue) * 100 : 0;
   const goalBarWidth = Math.min(Math.abs(goalProgress), 100);
+
+  return (
+    <div className="tj-panel tj-goal-panel">
+      <div className="tj-panel-head">
+        <div>
+          <h3>Weekly profit goal</h3>
+          <span className="tj-panel-sub">Monday through today</span>
+        </div>
+        <label className="tj-goal-input-label">
+          <span>Goal</span>
+          <input type="number" min="0" step="0.01" value={weeklyGoal} onChange={(event) => onWeeklyGoalChange(event.target.value)} placeholder="0.00" aria-label="Weekly profit goal" />
+        </label>
+      </div>
+      <div
+        className="tj-goal-track"
+        title={`Progress towards the goal: ${fmtMoney(weeklyProfit)} of ${fmtMoney(goalValue)}`}
+        aria-label={`Progress towards the goal: ${fmtMoney(weeklyProfit)} of ${fmtMoney(goalValue)}`}
+      >
+        <div className="tj-goal-half tj-goal-half-left">
+          {weeklyProfit < 0 ? <div className="tj-goal-fill tj-goal-fill-loss" style={{ width: `${goalBarWidth}%` }} /> : null}
+        </div>
+        <div className="tj-goal-center" />
+        <div className="tj-goal-half tj-goal-half-right">
+          {weeklyProfit > 0 ? <div className={`tj-goal-fill ${goalProgress >= 100 ? "tj-goal-fill-complete" : ""}`} style={{ width: `${goalBarWidth}%` }} /> : null}
+        </div>
+      </div>
+      <div className="tj-goal-summary">
+        <PnLText value={weeklyProfit} decimals={2} />
+        <span className="tj-panel-sub">
+          {goalValue > 0 ? `${fmtNum(Math.max(0, goalProgress), 0)}% of ${fmtMoney(goalValue)} goal` : "Set a goal to track this week"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scorecards, onSaveScorecard }) {
+  const weekStart = getWeekStartDate();
+  const weeklyProfit = trades.filter((trade) => trade.date >= weekStart).reduce((sum, trade) => sum + trade.pnl, 0);
 
   const stats = useMemo(() => {
     if (trades.length === 0) return null;
@@ -1141,51 +1331,20 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange }) {
     };
   }, [trades, tagLibrary]);
 
-  if (!stats) return <div className="tj-empty"><h2>No trades logged yet</h2><p>Add your first trade or import a CSV to see your performance take shape here.</p></div>;
+  if (!stats) return (
+    <div>
+      <WeeklyGoalPanel weeklyProfit={weeklyProfit} weeklyGoal={weeklyGoal} onWeeklyGoalChange={onWeeklyGoalChange} />
+      <ScorecardEntry scorecards={scorecards} onSave={onSaveScorecard} />
+      <div className="tj-empty"><h2>No trades logged yet</h2><p>Add your first trade or import a CSV to see your performance take shape here.</p></div>
+    </div>
+  );
 
   const equityPositive = stats.totalPnL >= 0;
 
   return (
     <div>
-      <div className="tj-panel tj-goal-panel">
-        <div className="tj-panel-head">
-          <div>
-            <h3>Weekly profit goal</h3>
-            <span className="tj-panel-sub">Monday through today</span>
-          </div>
-          <label className="tj-goal-input-label">
-            <span>Goal</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={weeklyGoal}
-              onChange={(event) => onWeeklyGoalChange(event.target.value)}
-              placeholder="0.00"
-              aria-label="Weekly profit goal"
-            />
-          </label>
-        </div>
-        <div
-          className="tj-goal-track"
-          title={`Progress towards the goal: ${fmtMoney(weeklyProfit)} of ${fmtMoney(goalValue)}`}
-          aria-label={`Progress towards the goal: ${fmtMoney(weeklyProfit)} of ${fmtMoney(goalValue)}`}
-        >
-          <div className="tj-goal-half tj-goal-half-left">
-            {weeklyProfit < 0 ? <div className="tj-goal-fill tj-goal-fill-loss" style={{ width: `${goalBarWidth}%` }} /> : null}
-          </div>
-          <div className="tj-goal-center" />
-          <div className="tj-goal-half tj-goal-half-right">
-            {weeklyProfit > 0 ? <div className={`tj-goal-fill ${goalProgress >= 100 ? "tj-goal-fill-complete" : ""}`} style={{ width: `${goalBarWidth}%` }} /> : null}
-          </div>
-        </div>
-        <div className="tj-goal-summary">
-          <PnLText value={weeklyProfit} decimals={2} />
-          <span className="tj-panel-sub">
-            {goalValue > 0 ? `${fmtNum(Math.max(0, goalProgress), 0)}% of ${fmtMoney(goalValue)} goal` : "Set a goal to track this week"}
-          </span>
-        </div>
-      </div>
+      <WeeklyGoalPanel weeklyProfit={weeklyProfit} weeklyGoal={weeklyGoal} onWeeklyGoalChange={onWeeklyGoalChange} />
+      <ScorecardEntry scorecards={scorecards} onSave={onSaveScorecard} />
 
       <div className="tj-stat-row">
         <StatBlock label="Total P&L" value={<PnLText value={stats.totalPnL} decimals={2} />} sub={`${stats.count} trades`} />
@@ -1996,7 +2155,7 @@ export default function TradingJournal() {
   const handleCreateAccount = () => {
     const name = window.prompt("Account name", `Account ${accounts.length + 1}`)?.trim();
     if (!name) return;
-    const account = { id: uid(), name, trades: [], weeklyGoal: "" };
+    const account = { id: uid(), name, trades: [], weeklyGoal: "", scorecards: [] };
     const next = [...accounts, account];
     setAccounts(next);
     setSelectedAccountId(account.id);
@@ -2015,6 +2174,28 @@ export default function TradingJournal() {
     setAccounts((prev) => {
       const next = prev.map((account) => account.id === activeAccount?.id
         ? { ...account, weeklyGoal: value }
+        : account);
+      sync(next, tagLibrary);
+      return next;
+    });
+  };
+
+  const handleSaveScorecard = (scorecard) => {
+    setAccounts((prev) => {
+      const account = prev.find((item) => item.id === activeAccount?.id);
+      if (!account || (account.scorecards || []).some((card) => card.date === scorecard.date)) return prev;
+      const next = prev.map((account) => account.id === activeAccount?.id
+        ? { ...account, scorecards: [scorecard, ...(account.scorecards || [])] }
+        : account);
+      sync(next, tagLibrary);
+      return next;
+    });
+  };
+
+  const handleDeleteScorecard = (scorecardId) => {
+    setAccounts((prev) => {
+      const next = prev.map((account) => account.id === activeAccount?.id
+        ? { ...account, scorecards: (account.scorecards || []).filter((card) => card.id !== scorecardId) }
         : account);
       sync(next, tagLibrary);
       return next;
@@ -2132,7 +2313,7 @@ export default function TradingJournal() {
     URL.revokeObjectURL(url);
   };
 
-  const tabLabel = { dashboard: "Dashboard", trades: "Trades", calendar: "Calendar", alerts: "Alerts" }[tab];
+  const tabLabel = { dashboard: "Dashboard", trades: "Trades", calendar: "Calendar", alerts: "Alerts", scorecards: "Scorecards" }[tab];
 
   if (cloudConfigured && !session && !loading) {
     return (
@@ -2356,6 +2537,21 @@ export default function TradingJournal() {
         .tj-alert-details strong { font-size: 13px; overflow-wrap: anywhere; }
         .tj-alert-details span { color: var(--text-dim); font-size: 11px; }
         .tj-alert-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .tj-scorecard-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: end; }
+        .tj-scorecard-form .tj-field input, .tj-scorecard-form .tj-field select { width: 100%; min-width: 0; }
+        .tj-scorecard-scale { color: var(--text-faint); font-size: 10px; }
+        .tj-scorecard-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; color: var(--text-dim); font-size: 12px; }
+        .tj-scorecard-total strong { color: var(--text); font-family: var(--font-mono); font-size: 15px; }
+        .tj-scorecard-total small { color: var(--text-faint); font-size: 11px; font-weight: 400; }
+        .tj-scorecard-save { justify-content: center; min-height: 36px; white-space: nowrap; }
+        .tj-scorecard-duplicate { grid-column: 1 / -1; border-left: 2px solid var(--loss); padding: 9px 11px; color: var(--loss); background: rgba(193,88,74,0.1); font-size: 12px; }
+        .tj-scorecard-complete { display: flex; align-items: center; gap: 9px; margin: 0 0 20px; padding: 13px 16px; border: 1px solid var(--gain-dim); border-left: 3px solid var(--gain); background: rgba(79,174,124,0.1); color: var(--gain); font-size: 13px; font-weight: 600; }
+        .tj-scorecard-averages { margin-bottom: 20px; }
+        .tj-scorecard-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); }
+        .tj-scorecard-table { width: 100%; min-width: 900px; border-collapse: collapse; text-align: left; font-size: 12px; }
+        .tj-scorecard-table th { padding: 11px 12px; color: var(--text-faint); font-size: 10px; font-weight: 500; white-space: nowrap; border-bottom: 1px solid var(--border-strong); }
+        .tj-scorecard-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        .tj-scorecard-table tbody tr:last-child td { border-bottom: 0; }
 
         /* Main */
         .tj-main { flex: 1; min-width: 0; padding: 28px 36px 60px; }
@@ -2711,6 +2907,8 @@ export default function TradingJournal() {
           .tj-alert-create { justify-content: center; }
           .tj-alert-row { align-items: flex-start; flex-direction: column; }
           .tj-alert-actions { width: 100%; }
+          .tj-scorecard-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .tj-scorecard-save { grid-column: 1 / -1; }
 
           .tj-sidebar-actions {
             display: grid;
@@ -2894,6 +3092,9 @@ export default function TradingJournal() {
             flex-basis: 100%;
           }
 
+          .tj-scorecard-form { grid-template-columns: 1fr; }
+          .tj-scorecard-save { grid-column: auto; }
+
           .tj-header-actions {
             flex-direction: column;
             align-items: stretch;
@@ -2936,6 +3137,9 @@ export default function TradingJournal() {
           <button className={`tj-nav-item ${tab === "alerts" ? "tj-nav-active" : ""}`} onClick={() => setTab("alerts")}>
             <Bell size={15} /> Alerts
           </button>
+          <button className={`tj-nav-item ${tab === "scorecards" ? "tj-nav-active" : ""}`} onClick={() => setTab("scorecards")}>
+            <ClipboardCheck size={15} /> Scorecards
+          </button>
         </nav>
         <div className="tj-sidebar-actions">
           <button className="tj-btn tj-btn-primary" onClick={handleAddNew} disabled={!activeAccount}>
@@ -2975,6 +3179,8 @@ export default function TradingJournal() {
                 tagLibrary={tagLibrary}
                 weeklyGoal={activeAccount?.weeklyGoal || ""}
                 onWeeklyGoalChange={handleWeeklyGoalChange}
+                scorecards={activeAccount?.scorecards || []}
+                onSaveScorecard={handleSaveScorecard}
               />
             )}
             {tab === "trades" && <TradesTab trades={trades} tagLibrary={tagLibrary} onEdit={handleEdit} />}
@@ -2988,6 +3194,12 @@ export default function TradingJournal() {
                 pushLoading={pushLoading}
                 pushMessage={pushMessage}
                 onEnablePush={handleEnablePush}
+              />
+            )}
+            {tab === "scorecards" && (
+              <ScorecardsTab
+                scorecards={activeAccount?.scorecards || []}
+                onDelete={handleDeleteScorecard}
               />
             )}
           </>
