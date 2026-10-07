@@ -79,8 +79,16 @@ function parseDate(dateStr) {
   return new Date(y, m - 1, d);
 }
 
+function isValidDateString(dateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return false;
+  const date = parseDate(dateStr);
+  return date.getFullYear() === Number(dateStr.slice(0, 4))
+    && date.getMonth() === Number(dateStr.slice(5, 7)) - 1
+    && date.getDate() === Number(dateStr.slice(8, 10));
+}
+
 function dayOfWeek(dateStr) {
-  if (!dateStr) return "";
+  if (!isValidDateString(dateStr)) return "";
   return WEEKDAYS[parseDate(dateStr).getDay()];
 }
 
@@ -99,8 +107,14 @@ function fmtNum(n, decimals = 2) {
   return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
+function finiteNumberOrNull(value) {
+  if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function fmtDateShort(dateStr) {
-  if (!dateStr) return "";
+  if (!isValidDateString(dateStr)) return "";
   const d = parseDate(dateStr);
   return `${MONTH_NAMES[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
 }
@@ -114,69 +128,117 @@ function getWeekStartDate() {
 }
 
 function getRealizedExitPrice(trade) {
-  const totalContracts = Number(trade.contracts);
-  if (!isFinite(totalContracts) || totalContracts <= 0) return null;
+  const totalContracts = finiteNumberOrNull(trade.contracts);
+  if (totalContracts === null || totalContracts <= 0) return null;
   const levels = Array.isArray(trade.tpLevels) ? trade.tpLevels : [];
-  const hitLevels = levels.filter((level) => level.hit && isFinite(Number(level.price)) && Number(level.contracts) > 0);
+  const hitLevels = levels.filter((level) => level?.hit);
   if (!hitLevels.length) {
-    const exitPrice = Number(trade.exitPrice);
-    return isFinite(exitPrice) ? exitPrice : null;
+    return finiteNumberOrNull(trade.exitPrice);
   }
 
-  const hitContracts = hitLevels.reduce((sum, level) => sum + Number(level.contracts), 0);
+  const parsedHitLevels = hitLevels.map((level) => ({
+    price: finiteNumberOrNull(level.price),
+    contracts: finiteNumberOrNull(level.contracts),
+  }));
+  if (parsedHitLevels.some((level) => level.price === null || level.contracts === null || level.contracts <= 0))
+    return null;
+  const hitContracts = parsedHitLevels.reduce((sum, level) => sum + level.contracts, 0);
   const remainingContracts = totalContracts - hitContracts;
   if (remainingContracts < 0) return null;
-  const remainingExitPrice = Number(trade.remainingExitPrice ?? trade.exitPrice);
-  if (remainingContracts > 0 && !isFinite(remainingExitPrice)) return null;
-  const hitValue = hitLevels.reduce((sum, level) => sum + Number(level.price) * Number(level.contracts), 0);
-  return (hitValue + (remainingContracts > 0 ? remainingExitPrice * remainingContracts : 0)) / totalContracts;
+  const remainingExitPrice = trade.remainingExitPrice === undefined || trade.remainingExitPrice === null
+    ? finiteNumberOrNull(trade.exitPrice)
+    : finiteNumberOrNull(trade.remainingExitPrice);
+  if (remainingContracts > 0 && remainingExitPrice === null) return null;
+  const hitValue = parsedHitLevels.reduce((sum, level) => sum + level.price * level.contracts, 0);
+  const averageExitPrice = (hitValue + (remainingContracts > 0 ? remainingExitPrice * remainingContracts : 0)) / totalContracts;
+  return Number.isFinite(averageExitPrice) ? averageExitPrice : null;
 }
 
 function computePnL(trade) {
-  const pv = POINT_VALUE[trade.instrument] ?? 0;
-  const entry = Number(trade.entryPrice);
+  const pv = POINT_VALUE[trade.instrument];
+  const entry = finiteNumberOrNull(trade.entryPrice);
   const exit = getRealizedExitPrice(trade);
-  const contracts = Number(trade.contracts);
-  if (!isFinite(entry) || exit === null || !isFinite(contracts)) return 0;
+  const contracts = finiteNumberOrNull(trade.contracts);
+  const fees = trade.fees === null || trade.fees === undefined || (typeof trade.fees === "string" && trade.fees.trim() === "")
+    ? 0
+    : finiteNumberOrNull(trade.fees);
+  if (
+    entry === null ||
+    exit === null ||
+    contracts === null ||
+    contracts <= 0 ||
+    pv === undefined ||
+    fees === null ||
+    !["Long", "Short"].includes(trade.direction)
+  ) return null;
   const diff = trade.direction === "Short" ? entry - exit : exit - entry;
-  return diff * contracts * pv - (Number(trade.fees) || 0);
+  const pnl = diff * contracts * pv - fees;
+  return Number.isFinite(pnl) ? pnl : null;
 }
 
 function getTakeProfitExitPrice(trade) {
   const levels = Array.isArray(trade.tpLevels) && trade.tpLevels.length
     ? trade.tpLevels
     : [{ price: trade.tpPrice, contracts: trade.contracts }];
-  const totalContracts = Number(trade.contracts);
-  const validLevels = levels.filter((level) => isFinite(Number(level.price)) && Number(level.contracts) > 0);
-  const allocatedContracts = validLevels.reduce((sum, level) => sum + Number(level.contracts), 0);
-  if (!validLevels.length || !isFinite(totalContracts) || allocatedContracts !== totalContracts) return null;
-  return validLevels.reduce((sum, level) => sum + Number(level.price) * Number(level.contracts), 0) / allocatedContracts;
+  const totalContracts = finiteNumberOrNull(trade.contracts);
+  if (totalContracts === null || totalContracts <= 0) return null;
+  const parsedLevels = levels.map((level) => ({
+    price: finiteNumberOrNull(level?.price),
+    contracts: finiteNumberOrNull(level?.contracts),
+  }));
+  if (!parsedLevels.length || parsedLevels.some((level) => level.price === null || level.contracts === null || level.contracts <= 0))
+    return null;
+  const allocatedContracts = parsedLevels.reduce((sum, level) => sum + level.contracts, 0);
+  if (allocatedContracts !== totalContracts) return null;
+  const averagePrice = parsedLevels.reduce((sum, level) => sum + level.price * level.contracts, 0) / allocatedContracts;
+  return Number.isFinite(averagePrice) ? averagePrice : null;
 }
 
 function computeRPoints(trade) {
   // risk in points based on entry/SL
-  const entry = Number(trade.entryPrice);
-  const sl = Number(trade.slPrice);
-  if (!isFinite(entry) || !isFinite(sl) || entry === sl) return null;
+  const entry = finiteNumberOrNull(trade.entryPrice);
+  const sl = finiteNumberOrNull(trade.slPrice);
+  if (entry === null || sl === null || entry === sl) return null;
   return Math.abs(entry - sl);
 }
 
 function computeRealizedR(trade) {
   const risk = computeRPoints(trade);
   if (risk === null) return null;
-  const entry = Number(trade.entryPrice);
+  const entry = finiteNumberOrNull(trade.entryPrice);
   const exit = getRealizedExitPrice(trade);
-  if (exit === null) return null;
+  if (entry === null || exit === null || !["Long", "Short"].includes(trade.direction)) return null;
   const reward = trade.direction === "Short" ? entry - exit : exit - entry;
-  return reward / risk;
+  const realizedR = reward / risk;
+  return Number.isFinite(realizedR) ? realizedR : null;
 }
 
 function computePlannedR(trade) {
   const risk = computeRPoints(trade);
-  const entry = Number(trade.entryPrice);
+  const entry = finiteNumberOrNull(trade.entryPrice);
   const averageTp = getTakeProfitExitPrice(trade);
-  if (risk === null || averageTp === null || !isFinite(entry)) return null;
-  return Math.abs(averageTp - entry) / risk;
+  if (risk === null || averageTp === null || entry === null || !["Long", "Short"].includes(trade.direction)) return null;
+  const levels = Array.isArray(trade.tpLevels) && trade.tpLevels.length
+    ? trade.tpLevels
+    : [{ price: trade.tpPrice, contracts: trade.contracts }];
+  const rewards = levels.map((level) => {
+    const price = finiteNumberOrNull(level?.price);
+    return price === null ? null : trade.direction === "Short" ? entry - price : price - entry;
+  });
+  if (rewards.some((reward) => reward === null || reward <= 0)) return null;
+  const reward = trade.direction === "Short" ? entry - averageTp : averageTp - entry;
+  const plannedR = reward / risk;
+  return Number.isFinite(plannedR) ? plannedR : null;
+}
+
+function hasCompletePnL(trade) {
+  return Number.isFinite(trade.pnl);
+}
+
+function getCompleteScorecardValues(card) {
+  const values = SCORECARD_CATEGORIES.map(({ key }) => finiteNumberOrNull(card[key]));
+  if (values.some((value) => value === null || value < 0 || value > 10)) return null;
+  return Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }, index) => [key, values[index]]));
 }
 
 function enrichTrade(trade) {
@@ -303,9 +365,9 @@ function rowToTrade(row) {
   const t = {
     id: uid(),
     date: "",
-    instrument: "NQ",
-    direction: "Long",
-    contracts: 1,
+    instrument: "",
+    direction: "",
+    contracts: "",
     entryPrice: "",
     exitPrice: "",
     tpPrice: "",
@@ -328,10 +390,15 @@ function rowToTrade(row) {
           ).padStart(2, "0")}`;
         }
       }
-    } else if (key === "instrument") t.instrument = normalizeInstrument(rawVal);
-    else if (key === "direction") t.direction = normalizeDirection(rawVal);
-    else if (key === "contracts") t.contracts = Number(rawVal) || 1;
-    else if (key === "notes") t.notes = String(rawVal || "");
+    } else if (key === "instrument") {
+      const instrument = String(rawVal || "").trim().toUpperCase();
+      t.instrument = INSTRUMENTS.includes(instrument) ? instrument : "";
+    } else if (key === "direction") {
+      const direction = String(rawVal || "").trim().toLowerCase();
+      t.direction = ["long", "buy", "l", "b", "short", "sell", "s"].includes(direction) ? normalizeDirection(rawVal) : "";
+    } else if (key === "contracts") {
+      t.contracts = String(rawVal || "").trim() === "" ? "" : Number(rawVal);
+    } else if (key === "notes") t.notes = String(rawVal || "");
     else if (key === "entryTime" || key === "exitTime") t[key] = String(rawVal || "").trim();
     else t[key] = rawVal === "" || rawVal === undefined ? "" : Number(rawVal);
   });
@@ -568,19 +635,25 @@ function AlertsTab({ alerts, onSave, onDelete, pushEnabled, pushLoading, pushMes
 
 function ScorecardEntry({ scorecards, trades, onSave }) {
   const [scores, setScores] = useState(() => Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }) => [key, ""])));
-  const total = SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + (Number(scores[key]) || 0), 0);
+  const completeScores = getCompleteScorecardValues(scores);
+  const total = completeScores
+    ? SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + completeScores[key], 0)
+    : null;
   const today = getLocalDateInputValue();
   const todaysTrades = trades.filter((trade) => trade.date === today);
-  const dailyPnl = todaysTrades.reduce((sum, trade) => sum + Number(trade.pnl || 0), 0);
+  const todaysTradesWithPnl = todaysTrades.filter(hasCompletePnL);
+  const dailyPnl = todaysTradesWithPnl.length
+    ? todaysTradesWithPnl.reduce((sum, trade) => sum + trade.pnl, 0)
+    : null;
   const dateAlreadyScored = scorecards.some((card) => card.date === today);
 
   const handleSubmit = (event) => {
     event.preventDefault();
-    if (dateAlreadyScored) return;
+    if (dateAlreadyScored || !completeScores) return;
     onSave({
       id: uid(),
       date: today,
-      ...Object.fromEntries(SCORECARD_CATEGORIES.map(({ key }) => [key, Number(scores[key])])),
+      ...completeScores,
       total,
       pnl: dailyPnl,
     });
@@ -601,7 +674,9 @@ function ScorecardEntry({ scorecards, trades, onSave }) {
       <div className="tj-panel-head">
         <div>
           <h3>Trading score sheet</h3>
-          <span className="tj-panel-sub">Today's total from {todaysTrades.length} trade{todaysTrades.length === 1 ? "" : "s"}</span>
+          <span className="tj-panel-sub">
+            Today's P&amp;L from {todaysTradesWithPnl.length} completed trade{todaysTradesWithPnl.length === 1 ? "" : "s"}
+          </span>
         </div>
         <ClipboardCheck size={16} />
       </div>
@@ -622,13 +697,19 @@ function ScorecardEntry({ scorecards, trades, onSave }) {
         ))}
         <label className="tj-field">
           P&amp;L
-          <input type="number" step="0.01" value={dailyPnl.toFixed(2)} readOnly aria-label={`Today's P&L from ${todaysTrades.length} trades`} />
+          <input
+            type="number"
+            step="0.01"
+            value={dailyPnl === null ? "" : dailyPnl.toFixed(2)}
+            readOnly
+            aria-label={`Today's P&L from ${todaysTradesWithPnl.length} completed trades`}
+          />
         </label>
         <div className="tj-scorecard-total">
           <span>Score total</span>
-          <strong>{total}<small> / 40</small></strong>
+          <strong>{total === null ? "—" : total}{total === null ? null : <small> / 40</small>}</strong>
         </div>
-        <button className="tj-btn tj-btn-primary tj-scorecard-save" type="submit" disabled={dateAlreadyScored}>
+        <button className="tj-btn tj-btn-primary tj-scorecard-save" type="submit" disabled={dateAlreadyScored || total === null}>
           <Plus size={14} /> Save scorecard
         </button>
       </form>
@@ -638,12 +719,23 @@ function ScorecardEntry({ scorecards, trades, onSave }) {
 
 function ScorecardsTab({ scorecards, onDelete }) {
   const averages = useMemo(() => {
-    if (!scorecards.length) return null;
-    const average = (key) => scorecards.reduce((sum, card) => sum + Number(card[key] || 0), 0) / scorecards.length;
-    const averageTotal = scorecards.reduce((sum, card) => sum + Number(card.total ?? SCORECARD_CATEGORIES.reduce((categorySum, { key }) => categorySum + Number(card[key] || 0), 0)), 0) / scorecards.length;
+    const completeScorecards = scorecards
+      .map(getCompleteScorecardValues)
+      .filter(Boolean);
+    if (!completeScorecards.length) return null;
+    const average = (key) => completeScorecards.reduce((sum, values) => sum + values[key], 0) / completeScorecards.length;
+    const averageTotal = completeScorecards.reduce(
+      (sum, values) => sum + SCORECARD_CATEGORIES.reduce((total, { key }) => total + values[key], 0),
+      0
+    ) / completeScorecards.length;
     return { average, averageTotal };
   }, [scorecards]);
-  const sortedScorecards = useMemo(() => [...scorecards].sort((a, b) => b.date.localeCompare(a.date)), [scorecards]);
+  const sortedScorecards = useMemo(
+    () => [...scorecards]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((card) => ({ ...card, completeValues: getCompleteScorecardValues(card) })),
+    [scorecards]
+  );
 
   return (
     <div>
@@ -673,9 +765,15 @@ function ScorecardsTab({ scorecards, onDelete }) {
                 {sortedScorecards.map((card) => (
                   <tr key={card.id}>
                     <td>{new Date(`${card.date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</td>
-                    {SCORECARD_CATEGORIES.map(({ key }) => <td key={key}>{Number(card[key] || 0)}</td>)}
-                    <td><strong>{Number(card.total ?? SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + Number(card[key] || 0), 0))} / 40</strong></td>
-                    <td><PnLText value={Number(card.pnl || 0)} /></td>
+                    {SCORECARD_CATEGORIES.map(({ key }) => <td key={key}>{card.completeValues ? card.completeValues[key] : "—"}</td>)}
+                    <td>
+                      <strong>
+                        {card.completeValues
+                          ? `${SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + card.completeValues[key], 0)} / 40`
+                          : "—"}
+                      </strong>
+                    </td>
+                    <td><PnLText value={card.pnl} /></td>
                     <td>
                       <button className="tj-icon-btn" onClick={() => onDelete(card.id)} aria-label={`Delete scorecard from ${card.date}`} title="Delete scorecard">
                         <Trash2 size={14} />
@@ -1212,7 +1310,7 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
 
 function WeeklyGoalPanel({ weeklyProfit, weeklyGoal, onWeeklyGoalChange }) {
   const goalValue = Number(weeklyGoal) || 0;
-  const goalProgress = goalValue > 0 ? (weeklyProfit / goalValue) * 100 : 0;
+  const goalProgress = goalValue > 0 && weeklyProfit !== null ? (weeklyProfit / goalValue) * 100 : 0;
   const goalBarWidth = Math.min(Math.abs(goalProgress), 100);
 
   return (
@@ -1243,7 +1341,11 @@ function WeeklyGoalPanel({ weeklyProfit, weeklyGoal, onWeeklyGoalChange }) {
       <div className="tj-goal-summary">
         <PnLText value={weeklyProfit} decimals={2} />
         <span className="tj-panel-sub">
-          {goalValue > 0 ? `${fmtNum(Math.max(0, goalProgress), 0)}% of ${fmtMoney(goalValue)} goal` : "Set a goal to track this week"}
+          {weeklyProfit === null
+            ? "No completed trades this week"
+            : goalValue > 0
+              ? `${fmtNum(Math.max(0, goalProgress), 0)}% of ${fmtMoney(goalValue)} goal`
+              : "Set a goal to track this week"}
         </span>
       </div>
     </div>
@@ -1252,23 +1354,29 @@ function WeeklyGoalPanel({ weeklyProfit, weeklyGoal, onWeeklyGoalChange }) {
 
 function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scorecards, onSaveScorecard }) {
   const weekStart = getWeekStartDate();
-  const weeklyProfit = trades.filter((trade) => trade.date >= weekStart).reduce((sum, trade) => sum + trade.pnl, 0);
+  const weeklyTradesWithPnl = trades.filter(
+    (trade) => isValidDateString(trade.date) && trade.date >= weekStart && hasCompletePnL(trade)
+  );
+  const weeklyProfit = weeklyTradesWithPnl.length
+    ? weeklyTradesWithPnl.reduce((sum, trade) => sum + trade.pnl, 0)
+    : null;
 
   const stats = useMemo(() => {
     if (trades.length === 0) return null;
-    const sorted = [...trades].sort(compareTradesAsc);
+    const pnlTrades = trades.filter(hasCompletePnL);
+    const sorted = [...pnlTrades].sort(compareTradesAsc);
     let cum = 0;
     const equity = sorted.map((t) => {
       cum += t.pnl;
       return { date: t.date, label: fmtDateShort(t.date), cum };
     });
-    const wins = trades.filter((t) => t.pnl > 0);
-    const losses = trades.filter((t) => t.pnl < 0);
-    const totalPnL = trades.reduce((s, t) => s + t.pnl, 0);
-    const winRate = (wins.length / trades.length) * 100;
-    const avgPnL = totalPnL / trades.length;
-    const best = trades.reduce((m, t) => (t.pnl > m.pnl ? t : m), trades[0]);
-    const worst = trades.reduce((m, t) => (t.pnl < m.pnl ? t : m), trades[0]);
+    const wins = pnlTrades.filter((t) => t.pnl > 0);
+    const losses = pnlTrades.filter((t) => t.pnl < 0);
+    const totalPnL = pnlTrades.length ? pnlTrades.reduce((s, t) => s + t.pnl, 0) : null;
+    const winRate = pnlTrades.length ? (wins.length / pnlTrades.length) * 100 : null;
+    const avgPnL = totalPnL === null ? null : totalPnL / pnlTrades.length;
+    const best = pnlTrades.length ? pnlTrades.reduce((m, t) => (t.pnl > m.pnl ? t : m), pnlTrades[0]) : null;
+    const worst = pnlTrades.length ? pnlTrades.reduce((m, t) => (t.pnl < m.pnl ? t : m), pnlTrades[0]) : null;
     const rValues = trades.map((t) => t.realizedR).filter((r) => r !== null && isFinite(r));
     const avgR = rValues.length ? rValues.reduce((s, r) => s + r, 0) / rValues.length : null;
     const plannedRValues = trades.map((t) => t.plannedR).filter((r) => r !== null && isFinite(r) && r > 0);
@@ -1277,12 +1385,12 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
       : null;
     const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
     const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
-    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
+    const profitFactor = pnlTrades.length ? (grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0) : null;
     const avgWin = wins.length ? grossWin / wins.length : 0;
     const avgLoss = losses.length ? grossLoss / losses.length : 0;
 
     // streak (most recent first)
-    const byDateDesc = [...trades].sort(compareTradesDesc);
+    const byDateDesc = [...pnlTrades].sort(compareTradesDesc);
     let streak = 0;
     if (byDateDesc.length) {
       const dir = byDateDesc[0].pnl >= 0 ? 1 : -1;
@@ -1297,7 +1405,8 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
     // day of week aggregation
     const dowMap = {};
     WEEKDAYS.forEach((d) => (dowMap[d] = { pnl: 0, count: 0, wins: 0 }));
-    trades.forEach((t) => {
+    pnlTrades.forEach((t) => {
+      if (!dowMap[t.dow]) return;
       dowMap[t.dow].pnl += t.pnl;
       dowMap[t.dow].count += 1;
       if (t.pnl > 0) dowMap[t.dow].wins += 1;
@@ -1311,7 +1420,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
     // instrument breakdown
     const instMap = {};
     INSTRUMENTS.forEach((i) => (instMap[i] = { pnl: 0, count: 0, wins: 0 }));
-    trades.forEach((t) => {
+    pnlTrades.forEach((t) => {
       instMap[t.instrument].pnl += t.pnl;
       instMap[t.instrument].count += 1;
       if (t.pnl > 0) instMap[t.instrument].wins += 1;
@@ -1320,7 +1429,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
     // Session and date-based metrics use the EST entry timestamp.
     const sessionMap = {};
     TRADING_SESSIONS.forEach((session) => (sessionMap[session] = { pnl: 0, count: 0, wins: 0 }));
-    trades.forEach((t) => {
+    pnlTrades.forEach((t) => {
       const session = getTradingSession(t);
       sessionMap[session].pnl += t.pnl;
       sessionMap[session].count += 1;
@@ -1329,7 +1438,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
 
     // tag performance
     const tagMap = {};
-    trades.forEach((t) => {
+    pnlTrades.forEach((t) => {
       (t.tags || []).forEach((tid) => {
         if (!tagMap[tid]) tagMap[tid] = { pnl: 0, count: 0, wins: 0 };
         tagMap[tid].pnl += t.pnl;
@@ -1367,7 +1476,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
       tagRows,
       avgConfBefore,
       avgConfAfter,
-      count: trades.length,
+      count: pnlTrades.length,
     };
   }, [trades, tagLibrary]);
 
@@ -1379,7 +1488,7 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
     </div>
   );
 
-  const equityPositive = stats.totalPnL >= 0;
+  const equityPositive = stats.totalPnL === null || stats.totalPnL >= 0;
 
   return (
     <div>
@@ -1390,7 +1499,11 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
         <StatBlock label="Total P&L" value={<PnLText value={stats.totalPnL} decimals={2} />} sub={`${stats.count} trades`} />
         <StatBlock
           label="Win rate"
-          value={<span className={stats.winRate >= 50 ? "tj-pos" : "tj-neg"}>{fmtNum(stats.winRate, 1)}%</span>}
+          value={
+            stats.winRate === null
+              ? "—"
+              : <span className={stats.winRate >= 50 ? "tj-pos" : "tj-neg"}>{fmtNum(stats.winRate, 1)}%</span>
+          }
         />
         <StatBlock label="Avg P&L / trade" value={<PnLText value={stats.avgPnL} decimals={2} />} />
         <StatBlock
@@ -1420,8 +1533,16 @@ function Dashboard({ trades, tagLibrary, weeklyGoal, onWeeklyGoalChange, scoreca
           label="Profit factor"
           value={stats.profitFactor === Infinity ? "∞" : fmtNum(stats.profitFactor, 2)}
         />
-        <StatBlock label="Best trade" value={<PnLText value={stats.best.pnl} decimals={2} />} sub={fmtDateShort(stats.best.date)} />
-        <StatBlock label="Worst trade" value={<PnLText value={stats.worst.pnl} decimals={2} />} sub={fmtDateShort(stats.worst.date)} />
+        <StatBlock
+          label="Best trade"
+          value={stats.best ? <PnLText value={stats.best.pnl} decimals={2} /> : "—"}
+          sub={stats.best ? fmtDateShort(stats.best.date) : ""}
+        />
+        <StatBlock
+          label="Worst trade"
+          value={stats.worst ? <PnLText value={stats.worst.pnl} decimals={2} /> : "—"}
+          sub={stats.worst ? fmtDateShort(stats.worst.date) : ""}
+        />
         <StatBlock
           label="Current streak"
           value={
@@ -1725,7 +1846,7 @@ function CalendarTab({ trades }) {
 
   const byDate = useMemo(() => {
     const m = {};
-    trades.forEach((t) => {
+    trades.filter((trade) => hasCompletePnL(trade) && isValidDateString(trade.date)).forEach((t) => {
       if (!m[t.date]) m[t.date] = { pnl: 0, count: 0 };
       m[t.date].pnl += t.pnl;
       m[t.date].count += 1;
@@ -1735,7 +1856,7 @@ function CalendarTab({ trades }) {
 
   const byMonth = useMemo(() => {
     const m = {};
-    trades.forEach((t) => {
+    trades.filter((trade) => hasCompletePnL(trade) && isValidDateString(trade.date)).forEach((t) => {
       const key = t.date.slice(0, 7); // YYYY-MM
       if (!m[key]) m[key] = { pnl: 0, count: 0 };
       m[key].pnl += t.pnl;
@@ -2289,7 +2410,7 @@ export default function TradingJournal() {
       complete: (results) => {
         const parsed = results.data
           .map(rowToTrade)
-          .filter((t) => t.date && t.entryPrice !== "" && t.exitPrice !== "");
+          .filter((t) => isValidDateString(t.date) && computePnL(t) !== null);
 
         if (parsed.length === 0) {
           setImportMsg("No valid rows found. Check your CSV columns.");
