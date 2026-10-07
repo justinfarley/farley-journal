@@ -113,12 +113,31 @@ function getWeekStartDate() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
+function getRealizedExitPrice(trade) {
+  const totalContracts = Number(trade.contracts);
+  if (!isFinite(totalContracts) || totalContracts <= 0) return null;
+  const levels = Array.isArray(trade.tpLevels) ? trade.tpLevels : [];
+  const hitLevels = levels.filter((level) => level.hit && isFinite(Number(level.price)) && Number(level.contracts) > 0);
+  if (!hitLevels.length) {
+    const exitPrice = Number(trade.exitPrice);
+    return isFinite(exitPrice) ? exitPrice : null;
+  }
+
+  const hitContracts = hitLevels.reduce((sum, level) => sum + Number(level.contracts), 0);
+  const remainingContracts = totalContracts - hitContracts;
+  if (remainingContracts < 0) return null;
+  const remainingExitPrice = Number(trade.remainingExitPrice ?? trade.exitPrice);
+  if (remainingContracts > 0 && !isFinite(remainingExitPrice)) return null;
+  const hitValue = hitLevels.reduce((sum, level) => sum + Number(level.price) * Number(level.contracts), 0);
+  return (hitValue + (remainingContracts > 0 ? remainingExitPrice * remainingContracts : 0)) / totalContracts;
+}
+
 function computePnL(trade) {
   const pv = POINT_VALUE[trade.instrument] ?? 0;
   const entry = Number(trade.entryPrice);
-  const exit = Number(trade.exitPrice);
+  const exit = getRealizedExitPrice(trade);
   const contracts = Number(trade.contracts);
-  if (!isFinite(entry) || !isFinite(exit) || !isFinite(contracts)) return 0;
+  if (!isFinite(entry) || exit === null || !isFinite(contracts)) return 0;
   const diff = trade.direction === "Short" ? entry - exit : exit - entry;
   return diff * contracts * pv - (Number(trade.fees) || 0);
 }
@@ -146,7 +165,8 @@ function computeRealizedR(trade) {
   const risk = computeRPoints(trade);
   if (risk === null) return null;
   const entry = Number(trade.entryPrice);
-  const exit = Number(trade.exitPrice);
+  const exit = getRealizedExitPrice(trade);
+  if (exit === null) return null;
   const reward = trade.direction === "Short" ? entry - exit : exit - entry;
   return reward / risk;
 }
@@ -747,13 +767,13 @@ function getCurrentEstDateTime() {
 function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCreateTag, onDeleteTag, onSave, onCancel, onDelete }) {
   const defaultEntryTime = getCurrentEstDateTime();
   const initialTakeProfitLevels = initial?.tpLevels?.length
-    ? initial.tpLevels.map((level) => ({ price: level.price ?? "", contracts: level.contracts ?? 1 }))
+    ? initial.tpLevels.map((level) => ({ price: level.price ?? "", contracts: level.contracts ?? 1, hit: Boolean(level.hit) }))
     : initial?.tpPrice !== "" && initial?.tpPrice !== undefined && initial?.tpPrice !== null
-      ? [{ price: initial.tpPrice, contracts: initial.contracts || 1 }]
+      ? [{ price: initial.tpPrice, contracts: initial.contracts || 1, hit: false }]
       : [];
   const [form, setForm] = useState(
     () =>
-      initial ? { ...initial, entryTime: toEstDateTimeInput(initial.entryTime), tpLevels: initialTakeProfitLevels } : {
+      initial ? { ...initial, exitPrice: initial.remainingExitPrice ?? initial.exitPrice, entryTime: toEstDateTimeInput(initial.entryTime), tpLevels: initialTakeProfitLevels } : {
         id: uid(),
         date: defaultEntryTime.slice(0, 10),
         instrument: "NQ",
@@ -764,6 +784,7 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
         entryTime: defaultEntryTime,
         tpPrice: "",
         tpLevels: [],
+        remainingExitPrice: "",
         slPrice: "",
         fees: 0,
         notes: "",
@@ -864,6 +885,14 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
     });
   };
 
+  const hitTakeProfitContracts = (form.tpLevels || []).filter((level) => level.hit).reduce((sum, level) => sum + Number(level.contracts || 0), 0);
+  const remainingContracts = Number(form.contracts || 0) - hitTakeProfitContracts;
+  const hasHitTakeProfits = hitTakeProfitContracts > 0;
+  const allContractsExitedAtTargets = hasHitTakeProfits && remainingContracts === 0;
+  const nextTakeProfitPrice = hasHitTakeProfits
+    ? (form.tpLevels || []).find((level) => !level.hit)?.price ?? ""
+    : getTakeProfitExitPrice(form) ?? form.tpPrice;
+
   const toggleExitPriceMode = (mode) => {
     const nextMode = exitPriceMode === mode ? "" : mode;
     setExitPriceMode(nextMode);
@@ -871,19 +900,20 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
 
   useEffect(() => {
     if (!exitPriceMode) return;
-    const sourcePrice = (exitPriceMode === "stopLoss" ? form.slPrice : getTakeProfitExitPrice(form) ?? form.tpPrice) ?? "";
+    const sourcePrice = (exitPriceMode === "stopLoss" ? form.slPrice : nextTakeProfitPrice) ?? "";
     setForm((f) => String(f.exitPrice) === String(sourcePrice) ? f : { ...f, exitPrice: sourcePrice });
-  }, [exitPriceMode, form.slPrice, form.tpLevels, form.tpPrice, form.contracts]);
+  }, [exitPriceMode, form.slPrice, nextTakeProfitPrice]);
 
   const previewPnl = useMemo(() => {
-    if (!form.entryPrice || !form.exitPrice || !form.contracts) return null;
-    return computePnL(form);
-  }, [form.entryPrice, form.exitPrice, form.contracts, form.direction, form.instrument, form.fees]);
+    if (!form.entryPrice || !form.contracts) return null;
+    const previewTrade = { ...form, remainingExitPrice: form.exitPrice };
+    const exitPrice = getRealizedExitPrice(previewTrade);
+    return exitPrice === null ? null : computePnL({ ...previewTrade, exitPrice });
+  }, [form.entryPrice, form.exitPrice, form.contracts, form.direction, form.instrument, form.fees, form.tpLevels]);
 
   const submit = () => {
     if (!form.date) return setError("Pick a date.");
     if (!form.entryPrice || isNaN(Number(form.entryPrice))) return setError("Enter a valid entry price.");
-    if (!form.exitPrice || isNaN(Number(form.exitPrice))) return setError("Enter a valid exit price.");
     if (!form.contracts || isNaN(Number(form.contracts)) || Number(form.contracts) <= 0)
       return setError("Enter a valid contract count.");
     const takeProfitLevels = (form.tpLevels || []).filter((level) => level.price !== "" || level.contracts !== "");
@@ -891,14 +921,32 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
     if (takeProfitLevels.some((level) => !isFinite(Number(level.price)) || Number(level.contracts) <= 0 || !Number.isInteger(Number(level.contracts))))
       return setError("Enter a valid price and whole contract count for each take-profit level.");
     if (takeProfitContracts !== Number(form.contracts)) return setError("Take-profit contracts must equal total contracts.");
+    const hitTakeProfitContracts = takeProfitLevels.filter((level) => level.hit).reduce((sum, level) => sum + Number(level.contracts), 0);
+    const remainingContracts = Number(form.contracts) - hitTakeProfitContracts;
+    if (hitTakeProfitContracts > Number(form.contracts)) return setError("Hit take-profit contracts cannot exceed the total position.");
+    if (remainingContracts > 0 && (!form.exitPrice || !isFinite(Number(form.exitPrice)))) return setError("Enter the exit price for the remaining contracts.");
+    const normalizedTakeProfitLevels = takeProfitLevels.map((level) => ({
+      price: Number(level.price),
+      contracts: Number(level.contracts),
+      hit: Boolean(level.hit),
+    }));
+    const effectiveExitPrice = getRealizedExitPrice({
+      ...form,
+      contracts: Number(form.contracts),
+      exitPrice: form.exitPrice === "" ? "" : Number(form.exitPrice),
+      remainingExitPrice: form.exitPrice === "" ? "" : Number(form.exitPrice),
+      tpLevels: normalizedTakeProfitLevels,
+    });
+    if (effectiveExitPrice === null) return setError("Enter a valid exit price.");
     setError("");
     onSave({
       ...form,
       contracts: Number(form.contracts),
       entryPrice: Number(form.entryPrice),
-      exitPrice: Number(form.exitPrice),
+      exitPrice: effectiveExitPrice,
+      remainingExitPrice: hitTakeProfitContracts > 0 && remainingContracts > 0 ? Number(form.exitPrice) : "",
       tpPrice: takeProfitLevels[0] ? Number(takeProfitLevels[0].price) : "",
-      tpLevels: takeProfitLevels.map((level) => ({ price: Number(level.price), contracts: Number(level.contracts) })),
+      tpLevels: normalizedTakeProfitLevels,
       slPrice: form.slPrice === "" ? "" : Number(form.slPrice),
       fees: form.fees === "" ? 0 : Number(form.fees),
       screenshot: form.screenshot || "",
@@ -973,12 +1021,21 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
           </label>
 
           <label className="tj-field">
-            <span>Exit price</span>
-            <input type="number" step="0.01" value={form.exitPrice} onChange={setExitPrice} placeholder="e.g. 19875.00" />
-            <div className="tj-exit-shortcuts">
-              <button type="button" className={`tj-shortcut-btn ${exitPriceMode === "stopLoss" ? "tj-shortcut-active" : ""}`} disabled={!form.slPrice} aria-pressed={exitPriceMode === "stopLoss"} onClick={() => toggleExitPriceMode("stopLoss")}>Same as stop loss</button>
-              <button type="button" className={`tj-shortcut-btn ${exitPriceMode === "takeProfit" ? "tj-shortcut-active" : ""}`} disabled={!getTakeProfitExitPrice(form)} aria-pressed={exitPriceMode === "takeProfit"} onClick={() => toggleExitPriceMode("takeProfit")}>Same as take profit</button>
-            </div>
+            <span>{allContractsExitedAtTargets ? "Average exit price" : hasHitTakeProfits ? `Exit price for remaining ${remainingContracts} contracts` : "Exit price"}</span>
+            <input
+              type="number"
+              step="0.01"
+              value={allContractsExitedAtTargets ? (getRealizedExitPrice({ ...form, remainingExitPrice: form.exitPrice }) ?? "") : form.exitPrice}
+              onChange={setExitPrice}
+              readOnly={allContractsExitedAtTargets}
+              placeholder="e.g. 19875.00"
+            />
+            {!allContractsExitedAtTargets ? (
+              <div className="tj-exit-shortcuts">
+                <button type="button" className={`tj-shortcut-btn ${exitPriceMode === "stopLoss" ? "tj-shortcut-active" : ""}`} disabled={!form.slPrice} aria-pressed={exitPriceMode === "stopLoss"} onClick={() => toggleExitPriceMode("stopLoss")}>Same as stop loss</button>
+                <button type="button" className={`tj-shortcut-btn ${exitPriceMode === "takeProfit" ? "tj-shortcut-active" : ""}`} disabled={!nextTakeProfitPrice} aria-pressed={exitPriceMode === "takeProfit"} onClick={() => toggleExitPriceMode("takeProfit")}>{hasHitTakeProfits ? "Same as next target" : "Same as take profit"}</button>
+              </div>
+            ) : null}
           </label>
 
           <div className="tj-field tj-tp-field">
@@ -988,10 +1045,12 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
             </button>
             {takeProfitOpen && (
               <div className="tj-tp-dropdown">
+                <div className="tj-tp-help">Mark filled targets. Planned R stays based on all targets and the original stop.</div>
                 {(form.tpLevels || []).map((level, index) => (
                   <div className="tj-tp-row" key={index}>
                     <input type="number" step="0.01" value={level.price} onChange={(e) => updateTakeProfit(index, "price", e.target.value)} placeholder="Price" aria-label={`Take-profit ${index + 1} price`} />
                     <input type="number" min="1" step="1" value={level.contracts} onChange={(e) => updateTakeProfit(index, "contracts", e.target.value)} placeholder="Contracts" aria-label={`Take-profit ${index + 1} contracts`} />
+                    <label className="tj-tp-hit"><input type="checkbox" checked={Boolean(level.hit)} onChange={(e) => updateTakeProfit(index, "hit", e.target.checked)} /> Hit</label>
                     <button type="button" className="tj-icon-btn" onClick={() => removeTakeProfit(index)} aria-label={`Remove take-profit ${index + 1}`} title="Remove take-profit">
                       <Trash2 size={13} />
                     </button>
@@ -1003,7 +1062,7 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
           </div>
 
           <label className="tj-field">
-            <span>Stop-loss price</span>
+            <span>Original stop-loss price</span>
             <input type="number" step="0.01" value={form.slPrice} onChange={setPriceWithExitSync("slPrice")} placeholder="optional" />
           </label>
 
@@ -2769,8 +2828,11 @@ export default function TradingJournal() {
         .tj-tp-toggle:hover { border-color: var(--accent); }
         .tj-tp-chevron-open { transform: rotate(180deg); }
         .tj-tp-dropdown { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; padding: 9px; border: 1px solid var(--border); background: var(--surface); border-radius: 3px; }
-        .tj-tp-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; }
+        .tj-tp-help { color: var(--text-faint); font-size: 10px; line-height: 1.5; }
+        .tj-tp-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: 6px; align-items: center; }
         .tj-tp-row input { min-width: 0; }
+        .tj-tp-hit { display: inline-flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+        .tj-tp-hit input { width: 14px; accent-color: var(--gain); }
         .tj-form-preview {
           display: flex; justify-content: space-between; align-items: center;
           margin-top: 18px; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border);
