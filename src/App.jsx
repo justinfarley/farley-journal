@@ -1018,7 +1018,8 @@ function TradeForm({ initial, accountCount = 1, lastTradeFees, tagLibrary, onCre
     const takeProfitContracts = takeProfitLevels.reduce((sum, level) => sum + Number(level.contracts), 0);
     if (takeProfitLevels.some((level) => !isFinite(Number(level.price)) || Number(level.contracts) <= 0 || !Number.isInteger(Number(level.contracts))))
       return setError("Enter a valid price and whole contract count for each take-profit level.");
-    if (takeProfitContracts !== Number(form.contracts)) return setError("Take-profit contracts must equal total contracts.");
+    if (takeProfitLevels.length > 0 && takeProfitContracts !== Number(form.contracts))
+      return setError("Take-profit contracts must equal total contracts.");
     const hitTakeProfitContracts = takeProfitLevels.filter((level) => level.hit).reduce((sum, level) => sum + Number(level.contracts), 0);
     const remainingContracts = Number(form.contracts) - hitTakeProfitContracts;
     if (hitTakeProfitContracts > Number(form.contracts)) return setError("Hit take-profit contracts cannot exceed the total position.");
