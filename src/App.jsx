@@ -474,6 +474,11 @@ function getLocalDateInputValue() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function getCurrentScorecardDate() {
+  const tradingDate = new Date(Date.now() + 6 * 60 * 60 * 1000);
+  return `${tradingDate.getFullYear()}-${String(tradingDate.getMonth() + 1).padStart(2, "0")}-${String(tradingDate.getDate()).padStart(2, "0")}`;
+}
+
 function loadLocalAlerts() {
   try {
     const saved = JSON.parse(window.localStorage.getItem(ALERTS_STORAGE_KEY) || "[]");
@@ -640,19 +645,20 @@ function ScorecardEntry({ scorecards, trades, onSave }) {
     ? SCORECARD_CATEGORIES.reduce((sum, { key }) => sum + completeScores[key], 0)
     : null;
   const today = getLocalDateInputValue();
+  const scorecardDate = getCurrentScorecardDate();
   const todaysTrades = trades.filter((trade) => trade.date === today);
   const todaysTradesWithPnl = todaysTrades.filter(hasCompletePnL);
   const dailyPnl = todaysTradesWithPnl.length
     ? todaysTradesWithPnl.reduce((sum, trade) => sum + trade.pnl, 0)
     : null;
-  const dateAlreadyScored = scorecards.some((card) => card.date === today);
+  const dateAlreadyScored = scorecards.some((card) => card.date === scorecardDate);
 
   const handleSubmit = (event) => {
     event.preventDefault();
     if (dateAlreadyScored || !completeScores) return;
     onSave({
       id: uid(),
-      date: today,
+      date: scorecardDate,
       ...completeScores,
       total,
       pnl: dailyPnl,
